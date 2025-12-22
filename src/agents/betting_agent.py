@@ -2,6 +2,7 @@ from src.models.bankroll_manager import BankrollManager
 from src.models.probability_model import ProbabilityModel
 from src.models.bet_history import BetHistory
 from src.models.risk_manager import RiskManager
+from src.models.advanced_stats import AdvancedStats
 from src.services.football_api import FootballAPI
 from src.services.odds_api import OddsAPI
 from src.utils.validators import OpportunityValidator
@@ -177,9 +178,24 @@ class BettingAgent:
         opportunities = []
         markets = odds.get('markets', {})
         
-        # Simula stats (em produção viria da API)
-        home_stats = {'avg_scored': 1.8, 'avg_conceded': 1.2}
-        away_stats = {'avg_scored': 1.5, 'avg_conceded': 1.3}
+        # Stats com forma recente e mando (simuladas - em produção viriam da API)
+        home_team_data = {
+            'base_avg_scored': 1.8,
+            'base_avg_conceded': 1.2,
+            'recent_form': ['W', 'W', 'W', 'D', 'W'],  # Simula boa forma
+            'is_home': True
+        }
+        
+        away_team_data = {
+            'base_avg_scored': 1.5,
+            'base_avg_conceded': 1.3,
+            'recent_form': ['W', 'D', 'L', 'D', 'W'],  # Simula forma regular
+            'is_home': False
+        }
+        
+        # Calcula stats melhoradas
+        home_stats = AdvancedStats.get_enhanced_stats(home_team_data)
+        away_stats = AdvancedStats.get_enhanced_stats(away_team_data)
         
         # Analisa Over 2.5
         if 'over_2.5' in markets:
