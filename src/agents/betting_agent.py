@@ -6,6 +6,7 @@ from src.services.football_api import FootballAPI
 from src.services.odds_api import OddsAPI
 from src.utils.validators import OpportunityValidator
 from src.utils.reporter import Reporter
+from src.utils.multiple_detector import MultipleDetector
 from typing import List, Dict
 
 class BettingAgent:
@@ -110,6 +111,33 @@ class BettingAgent:
         opportunities.sort(key=lambda x: x['ev'], reverse=True)
         
         return opportunities
+    
+    def detect_multiples(self, opportunities: List[Dict]) -> List[Dict]:
+        """Detecta múltiplas estratégicas"""
+        # Só sugere múltiplas em fase 1 e 2 (alavancagem agressiva)
+        phase = self.bankroll_manager.phase
+        
+        if phase not in [1, 2]:
+            return []
+        
+        # Detecta múltiplas
+        multiples = MultipleDetector.detect_multiples(
+            opportunities,
+            min_combined_prob=0.30,  # 30% probabilidade combinada mínima
+            max_legs=3  # Máximo 3 pernas
+        )
+        
+        # Calcula stakes para cada múltipla
+        formatted_multiples = []
+        for multiple in multiples[:3]:  # Top 3 múltiplas
+            # Stake mais agressivo para múltiplas (5-8% da banca)
+            stake_pct = 0.08 if phase == 1 else 0.05
+            stake = self.bankroll_manager.bankroll * stake_pct
+            
+            formatted = MultipleDetector.format_multiple(multiple, stake)
+            formatted_multiples.append(formatted)
+        
+        return formatted_multiples
     
     def _validate_opportunities(self, opportunities: List[Dict], phase_info: Dict) -> List[Dict]:
         """Valida oportunidades antes de sugerir"""
@@ -279,6 +307,13 @@ class BettingAgent:
         
         if opportunities:
             report += Reporter.format_opportunity_list(opportunities)
+            
+            # Detecta e mostra múltiplas
+            multiples = self.detect_multiples(opportunities)
+            if multiples:
+                report += "\n🎯 MÚLTIPLAS ESTRATÉGICAS DETECTADAS:\n"
+                for i, multiple in enumerate(multiples, 1):
+                    report += Reporter.format_multiple_suggestion(multiple)
         
         # Verifica se completou fase
         completed, withdraw = self.check_phase_completion()
