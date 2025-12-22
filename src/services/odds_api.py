@@ -2,6 +2,7 @@ import requests
 from typing import List, Dict
 from config.config import Config
 from src.cache.redis_client import RedisCache
+from src.utils.api_retry import retry_on_rate_limit
 from datetime import datetime
 
 class OddsAPI:
@@ -12,6 +13,7 @@ class OddsAPI:
         self.base_url = Config.ODDS_API_BASE_URL
         self.cache = RedisCache()
     
+    @retry_on_rate_limit(max_retries=3)
     def get_odds_for_match(self, sport: str = 'soccer_epl') -> List[Dict]:
         """Busca odds para jogos (cache: 15 minutos)"""
         cache_key = f"odds:{sport}:{datetime.now().strftime('%Y-%m-%d-%H')}"
@@ -31,20 +33,15 @@ class OddsAPI:
             'oddsFormat': 'decimal'
         }
         
-        try:
-            response = requests.get(url, params=params)
-            response.raise_for_status()
-            
-            formatted = self._format_odds(response.json())
-            
-            # Salva no cache (15 minutos)
-            self.cache.set(cache_key, formatted, expire_seconds=900)
-            
-            return formatted
+        response = requests.get(url, params=params)
+        response.raise_for_status()
         
-        except Exception as e:
-            print(f"Erro ao buscar odds: {e}")
-            return []
+        formatted = self._format_odds(response.json())
+        
+        # Salva no cache (15 minutos)
+        self.cache.set(cache_key, formatted, expire_seconds=900)
+        
+        return formatted
     
     def _format_odds(self, data: List[Dict]) -> List[Dict]:
         """Formata odds recebidas"""

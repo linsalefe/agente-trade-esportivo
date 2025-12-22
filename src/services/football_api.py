@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict
 from config.config import Config
 from src.cache.redis_client import RedisCache
+from src.utils.api_retry import retry_on_rate_limit
 
 class FootballAPI:
     """Serviço para buscar dados de jogos com cache Redis"""
@@ -13,6 +14,7 @@ class FootballAPI:
         self.headers = {'X-Auth-Token': self.api_key}
         self.cache = RedisCache()
     
+    @retry_on_rate_limit(max_retries=3)
     def get_today_matches(self) -> List[Dict]:
         """Busca jogos de hoje (cache: 6 horas)"""
         cache_key = f"matches:today:{datetime.now().strftime('%Y-%m-%d')}"
@@ -31,22 +33,18 @@ class FootballAPI:
         url = f"{self.base_url}/matches"
         params = {'dateFrom': today, 'dateTo': today}
         
-        try:
-            response = requests.get(url, headers=self.headers, params=params)
-            response.raise_for_status()
-            
-            matches = response.json().get('matches', [])
-            formatted = self._format_matches(matches)
-            
-            # Salva no cache (6 horas)
-            self.cache.set(cache_key, formatted, expire_seconds=21600)
-            
-            return formatted
+        response = requests.get(url, headers=self.headers, params=params)
+        response.raise_for_status()
         
-        except Exception as e:
-            print(f"Erro ao buscar jogos: {e}")
-            return []
+        matches = response.json().get('matches', [])
+        formatted = self._format_matches(matches)
+        
+        # Salva no cache (6 horas)
+        self.cache.set(cache_key, formatted, expire_seconds=21600)
+        
+        return formatted
     
+    @retry_on_rate_limit(max_retries=3)
     def get_matches_next_days(self, days: int = 7) -> List[Dict]:
         """Busca jogos dos próximos N dias (cache: 6 horas)"""
         cache_key = f"matches:next_{days}days:{datetime.now().strftime('%Y-%m-%d')}"
@@ -66,21 +64,16 @@ class FootballAPI:
         url = f"{self.base_url}/matches"
         params = {'dateFrom': date_from, 'dateTo': date_to}
         
-        try:
-            response = requests.get(url, headers=self.headers, params=params)
-            response.raise_for_status()
-            
-            matches = response.json().get('matches', [])
-            formatted = self._format_matches(matches)
-            
-            # Salva no cache (6 horas)
-            self.cache.set(cache_key, formatted, expire_seconds=21600)
-            
-            return formatted
+        response = requests.get(url, headers=self.headers, params=params)
+        response.raise_for_status()
         
-        except Exception as e:
-            print(f"Erro ao buscar jogos: {e}")
-            return []
+        matches = response.json().get('matches', [])
+        formatted = self._format_matches(matches)
+        
+        # Salva no cache (6 horas)
+        self.cache.set(cache_key, formatted, expire_seconds=21600)
+        
+        return formatted
     
     def _format_matches(self, matches: List[Dict]) -> List[Dict]:
         """Formata dados dos jogos"""
@@ -98,6 +91,7 @@ class FootballAPI:
         
         return formatted
     
+    @retry_on_rate_limit(max_retries=3)
     def get_team_stats(self, team_id: int, last_n_games: int = 5) -> Dict:
         """Busca estatísticas recentes do time (cache: 24 horas)"""
         cache_key = f"team_stats:{team_id}:last_{last_n_games}"
@@ -111,21 +105,16 @@ class FootballAPI:
         url = f"{self.base_url}/teams/{team_id}/matches"
         params = {'limit': last_n_games}
         
-        try:
-            response = requests.get(url, headers=self.headers, params=params)
-            response.raise_for_status()
-            
-            matches = response.json().get('matches', [])
-            stats = self._calculate_team_stats(matches, team_id)
-            
-            # Salva no cache (24 horas)
-            self.cache.set(cache_key, stats, expire_seconds=86400)
-            
-            return stats
+        response = requests.get(url, headers=self.headers, params=params)
+        response.raise_for_status()
         
-        except Exception as e:
-            print(f"Erro ao buscar stats do time: {e}")
-            return {}
+        matches = response.json().get('matches', [])
+        stats = self._calculate_team_stats(matches, team_id)
+        
+        # Salva no cache (24 horas)
+        self.cache.set(cache_key, stats, expire_seconds=86400)
+        
+        return stats
     
     def _calculate_team_stats(self, matches: List[Dict], team_id: int) -> Dict:
         """Calcula médias de gols"""
