@@ -1,7 +1,11 @@
 from src.models.bankroll_manager import BankrollManager
 from src.models.probability_model import ProbabilityModel
+from src.models.bet_history import BetHistory
+from src.models.risk_manager import RiskManager
 from src.services.football_api import FootballAPI
 from src.services.odds_api import OddsAPI
+from src.utils.validators import OpportunityValidator
+from src.utils.reporter import Reporter
 from typing import List, Dict
 
 class BettingAgent:
@@ -12,6 +16,8 @@ class BettingAgent:
         self.probability_model = ProbabilityModel()
         self.football_api = FootballAPI()
         self.odds_api = OddsAPI()
+        self.bet_history = BetHistory()
+        self.risk_manager = RiskManager(current_bankroll, self.bankroll_manager.phase)
     
     def analyze_today_opportunities(self) -> List[Dict]:
         """Analisa todas oportunidades do dia"""
@@ -46,10 +52,36 @@ class BettingAgent:
             opps = self._analyze_match_markets(match, match_odds, phase_info)
             opportunities.extend(opps)
         
+        # Valida oportunidades
+        opportunities = self._validate_opportunities(opportunities, phase_info)
+        
         # Ordena por EV
         opportunities.sort(key=lambda x: x['ev'], reverse=True)
         
         return opportunities
+    
+    def _validate_opportunities(self, opportunities: List[Dict], phase_info: Dict) -> List[Dict]:
+        """Valida oportunidades antes de sugerir"""
+        validated = []
+        
+        for opp in opportunities:
+            is_valid, errors = OpportunityValidator.validate_opportunity(
+                opp, 
+                phase_info, 
+                self.bankroll_manager.bankroll
+            )
+            
+            if is_valid:
+                # Verifica limites de risco
+                can_bet, msg = self.risk_manager.check_daily_limit(opp['stake'])
+                if can_bet:
+                    validated.append(opp)
+                else:
+                    print(f"⚠️  Rejeitado: {opp['match']} - {msg}")
+            else:
+                print(f"⚠️  Rejeitado: {opp['match']} - {errors[0]}")
+        
+        return validated
     
     def _find_match_odds(self, match: Dict, odds_data: List[Dict]) -> Dict:
         """Encontra odds para o jogo específico"""
@@ -109,6 +141,10 @@ class BettingAgent:
             ev
         )
         
+        # Aplica ajuste de risco se necessário
+        stake_adjustment = self.risk_manager.get_stake_adjustment()
+        stake = stake * stake_adjustment
+        
         return {
             'match': f"{match['home_team']} x {match['away_team']}",
             'competition': match['competition'],
@@ -117,8 +153,9 @@ class BettingAgent:
             'odds': market_odds,
             'probability': probs['prob_over'],
             'ev': ev,
-            'stake': stake,
-            'potential_return': round(stake * market_odds, 2)
+            'stake': round(stake, 2),
+            'potential_return': round(stake * market_odds, 2),
+            'phase': phase_info['phase']
         }
     
     def _analyze_btts(self, match: Dict, odds: Dict, home_stats: Dict, 
@@ -142,6 +179,10 @@ class BettingAgent:
         
         stake = self.bankroll_manager.calculate_stake(prob_btts, market_odds, ev)
         
+        # Aplica ajuste de risco
+        stake_adjustment = self.risk_manager.get_stake_adjustment()
+        stake = stake * stake_adjustment
+        
         return {
             'match': f"{match['home_team']} x {match['away_team']}",
             'competition': match['competition'],
@@ -150,9 +191,57 @@ class BettingAgent:
             'odds': market_odds,
             'probability': prob_btts,
             'ev': ev,
-            'stake': stake,
-            'potential_return': round(stake * market_odds, 2)
+            'stake': round(stake, 2),
+            'potential_return': round(stake * market_odds, 2),
+            'phase': phase_info['phase']
         }
+    
+    def register_bet(self, bet_data: Dict) -> str:
+        """Registra aposta no histórico"""
+        bet_id = self.bet_history.add_bet(bet_data)
+        self.risk_manager.add_stake(bet_data['stake'])
+        return bet_id
+    
+    def update_bet_result(self, bet_id: str, result: str):
+        """Atualiza resultado de aposta"""
+        success = self.bet_history.update_bet_result(bet_id, result)
+        if success:
+            self.risk_manager.update_sequence(result)
+        return success
+    
+    def get_statistics(self) -> Dict:
+        """Retorna estatísticas completas"""
+        return self.bet_history.get_statistics(self.bankroll_manager.phase)
+    
+    def check_phase_completion(self) -> tuple:
+        """Verifica se completou fase"""
+        return self.bankroll_manager.check_phase_completion()
+    
+    def get_full_report(self, opportunities: List[Dict]) -> str:
+        """Gera relatório completo"""
+        phase_info = self.bankroll_manager.get_phase_info()
+        risk_summary = self.risk_manager.get_risk_summary()
+        
+        report = Reporter.generate_daily_report(opportunities, phase_info, risk_summary)
+        
+        if opportunities:
+            report += Reporter.format_opportunity_list(opportunities)
+        
+        # Verifica se completou fase
+        completed, withdraw = self.check_phase_completion()
+        if completed:
+            report += Reporter.generate_phase_completion_alert(
+                phase_info['phase'],
+                withdraw,
+                self.bankroll_manager.bankroll - withdraw
+            )
+        
+        # Adiciona estatísticas
+        stats = self.get_statistics()
+        if stats['total_bets'] > 0:
+            report += Reporter.generate_statistics_report(stats)
+        
+        return report
     
     def get_phase_summary(self) -> str:
         """Retorna resumo da fase atual"""
