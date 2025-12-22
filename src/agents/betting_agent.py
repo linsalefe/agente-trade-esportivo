@@ -23,21 +23,38 @@ class BettingAgent:
         """Analisa todas oportunidades do dia"""
         print("🔍 Buscando jogos de hoje...")
         
-        # Verifica se tem API configurada
+        # Tenta usar APIs reais
         api_key = self.football_api.api_key
-        if not api_key or api_key == 'your_api_key_here':
+        if api_key and api_key != 'your_api_key_here':
+            print("✅ APIs configuradas. Usando dados reais...")
+            
+            # Busca jogos dos próximos 3 dias
+            matches = self.football_api.get_matches_next_days(3)
+            
+            if not matches:
+                print("⚠️  Nenhum jogo encontrado. Usando dados simulados...")
+                from src.utils.mock_data import get_mock_matches, get_mock_odds
+                matches = get_mock_matches()
+                odds_data = get_mock_odds()
+            else:
+                print(f"📊 Encontrados {len(matches)} jogos reais")
+                
+                # Busca odds reais
+                print("💰 Buscando odds reais...")
+                odds_data = []
+                
+                # Busca odds de múltiplas ligas
+                sports = ['soccer_epl', 'soccer_spain_la_liga', 'soccer_portugal_primeira_liga']
+                for sport in sports:
+                    odds = self.odds_api.get_odds_for_match(sport)
+                    odds_data.extend(odds)
+                
+                print(f"💰 {len(odds_data)} jogos com odds disponíveis")
+        else:
             print("⚠️  API não configurada. Usando dados simulados para teste...")
             from src.utils.mock_data import get_mock_matches, get_mock_odds
             matches = get_mock_matches()
             odds_data = get_mock_odds()
-        else:
-            matches = self.football_api.get_today_matches()
-            if not matches:
-                return []
-            odds_data = self.odds_api.get_odds_for_match()
-        
-        print(f"📊 Encontrados {len(matches)} jogos")
-        print("💰 Analisando odds...")
         
         opportunities = []
         phase_info = self.bankroll_manager.get_phase_info()
@@ -86,8 +103,10 @@ class BettingAgent:
     def _find_match_odds(self, match: Dict, odds_data: List[Dict]) -> Dict:
         """Encontra odds para o jogo específico"""
         for odds in odds_data:
-            if (odds['home_team'].lower() in match['home_team'].lower() or
-                odds['away_team'].lower() in match['away_team'].lower()):
+            home_match = odds['home_team'].lower() in match['home_team'].lower()
+            away_match = odds['away_team'].lower() in match['away_team'].lower()
+            
+            if home_match or away_match:
                 return odds
         return {}
     
@@ -107,10 +126,10 @@ class BettingAgent:
             if opp:
                 opportunities.append(opp)
         
-        # Analisa BTTS
-        if 'btts_yes' in markets:
-            opp = self._analyze_btts(match, odds, home_stats, away_stats, 
-                                    markets['btts_yes'], phase_info)
+        # Analisa Over 2.0
+        if 'over_2.0' in markets:
+            opp = self._analyze_over_under(match, odds, home_stats, away_stats, 
+                                          2.0, markets['over_2.0'], phase_info)
             if opp:
                 opportunities.append(opp)
         
