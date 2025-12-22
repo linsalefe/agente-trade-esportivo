@@ -21,6 +21,8 @@ class BettingAgent:
     
     def analyze_today_opportunities(self) -> List[Dict]:
         """Analisa todas oportunidades do dia"""
+        from config.config import Config
+        
         print("🔍 Buscando jogos de hoje...")
         
         # Tenta usar APIs reais
@@ -28,33 +30,65 @@ class BettingAgent:
         if api_key and api_key != 'your_api_key_here':
             print("✅ APIs configuradas. Usando dados reais...")
             
-            # Busca jogos dos próximos 3 dias
-            matches = self.football_api.get_matches_next_days(3)
-            
-            if not matches:
-                print("⚠️  Nenhum jogo encontrado. Usando dados simulados...")
+            try:
+                # Busca jogos dos próximos 3 dias
+                matches = self.football_api.get_matches_next_days(3)
+                
+                if not matches:
+                    if Config.ENVIRONMENT == 'production':
+                        print("❌ ERRO: Nenhum jogo encontrado e sistema está em PRODUÇÃO")
+                        print("❌ NÃO é seguro operar sem dados reais. Abortando...")
+                        return []
+                    else:
+                        print("⚠️  Nenhum jogo encontrado. Usando dados simulados (DEVELOPMENT)...")
+                        from src.utils.mock_data import get_mock_matches, get_mock_odds
+                        matches = get_mock_matches()
+                        odds_data = get_mock_odds()
+                else:
+                    print(f"📊 Encontrados {len(matches)} jogos reais")
+                    
+                    # Busca odds reais
+                    print("💰 Buscando odds reais...")
+                    odds_data = []
+                    
+                    # Busca odds de múltiplas ligas
+                    sports = ['soccer_epl', 'soccer_spain_la_liga', 'soccer_portugal_primeira_liga']
+                    for sport in sports:
+                        odds = self.odds_api.get_odds_for_match(sport)
+                        odds_data.extend(odds)
+                    
+                    if not odds_data:
+                        if Config.ENVIRONMENT == 'production':
+                            print("❌ ERRO: Nenhuma odd encontrada e sistema está em PRODUÇÃO")
+                            print("❌ NÃO é seguro operar sem odds reais. Abortando...")
+                            return []
+                        else:
+                            print("⚠️  Nenhuma odd encontrada. Usando dados simulados (DEVELOPMENT)...")
+                            from src.utils.mock_data import get_mock_odds
+                            odds_data = get_mock_odds()
+                    else:
+                        print(f"💰 {len(odds_data)} jogos com odds disponíveis")
+                        
+            except Exception as e:
+                print(f"❌ ERRO ao buscar dados das APIs: {e}")
+                if Config.ENVIRONMENT == 'production':
+                    print("❌ Sistema em PRODUÇÃO. Abortando por segurança...")
+                    return []
+                else:
+                    print("⚠️  Usando dados simulados (DEVELOPMENT)...")
+                    from src.utils.mock_data import get_mock_matches, get_mock_odds
+                    matches = get_mock_matches()
+                    odds_data = get_mock_odds()
+        else:
+            if Config.ENVIRONMENT == 'production':
+                print("❌ ERRO: APIs não configuradas e sistema está em PRODUÇÃO")
+                print("❌ Configure as API keys no .env antes de operar. Abortando...")
+                return []
+            else:
+                print("⚠️  API não configurada. Usando dados simulados para teste (DEVELOPMENT)...")
                 from src.utils.mock_data import get_mock_matches, get_mock_odds
                 matches = get_mock_matches()
                 odds_data = get_mock_odds()
-            else:
-                print(f"📊 Encontrados {len(matches)} jogos reais")
-                
-                # Busca odds reais
-                print("💰 Buscando odds reais...")
-                odds_data = []
-                
-                # Busca odds de múltiplas ligas
-                sports = ['soccer_epl', 'soccer_spain_la_liga', 'soccer_portugal_primeira_liga']
-                for sport in sports:
-                    odds = self.odds_api.get_odds_for_match(sport)
-                    odds_data.extend(odds)
-                
-                print(f"💰 {len(odds_data)} jogos com odds disponíveis")
-        else:
-            print("⚠️  API não configurada. Usando dados simulados para teste...")
-            from src.utils.mock_data import get_mock_matches, get_mock_odds
-            matches = get_mock_matches()
-            odds_data = get_mock_odds()
         
         opportunities = []
         phase_info = self.bankroll_manager.get_phase_info()

@@ -6,6 +6,9 @@ load_dotenv()
 class Config:
     """Configurações gerais do agente"""
     
+    # Ambiente
+    ENVIRONMENT = os.getenv('ENVIRONMENT', 'development')
+    
     # Banca
     INITIAL_BANKROLL = float(os.getenv('INITIAL_BANKROLL', 100))
     CURRENT_PHASE = int(os.getenv('CURRENT_PHASE', 1))
@@ -47,7 +50,7 @@ class Config:
     DB_CONFIG = {
         'host': os.getenv('DB_HOST', 'localhost'),
         'port': os.getenv('DB_PORT', 5432),
-        'database': os.getenv('DB_NAME', 'betting_agent'),
+        'database': os.getenv('DB_NAME', 'agente_betting'),
         'user': os.getenv('DB_USER', 'postgres'),
         'password': os.getenv('DB_PASSWORD')
     }
