@@ -211,6 +211,18 @@ class BettingAgent:
             if opp:
                 opportunities.append(opp)
         
+        # Analisa Spreads/Handicaps
+        for key, value in markets.items():
+            if key.startswith('spread_'):
+                try:
+                    line = float(key.replace('spread_', ''))
+                    opp = self._analyze_handicap(match, odds, home_stats, away_stats,
+                                                 line, value, phase_info)
+                    if opp:
+                        opportunities.append(opp)
+                except:
+                    pass
+        
         return opportunities
     
     def _analyze_over_under(self, match: Dict, odds: Dict, home_stats: Dict, 
@@ -249,6 +261,49 @@ class BettingAgent:
             'market': f'Over {line}',
             'odds': market_odds,
             'probability': probs['prob_over'],
+            'ev': ev,
+            'stake': round(stake, 2),
+            'potential_return': round(stake * market_odds, 2),
+            'phase': phase_info['phase']
+        }
+    def _analyze_handicap(self, match: Dict, odds: Dict, home_stats: Dict, 
+                         away_stats: Dict, line: float, market_odds: float, 
+                         phase_info: Dict) -> Dict:
+        """Analisa oportunidade de Handicap/Spread"""
+        probs = self.probability_model.calculate_handicap(
+            home_stats['avg_scored'], 
+            away_stats['avg_scored'], 
+            line
+        )
+        
+        is_valid, ev = self.probability_model.validate_opportunity(
+            probs['prob_home_cover'], 
+            market_odds, 
+            phase_info['min_ev']
+        )
+        
+        if not is_valid:
+            return None
+        
+        stake = self.bankroll_manager.calculate_stake(
+            probs['prob_home_cover'], 
+            market_odds, 
+            ev
+        )
+        
+        # Aplica ajuste de risco
+        stake_adjustment = self.risk_manager.get_stake_adjustment()
+        stake = stake * stake_adjustment
+        
+        line_str = f"{line:+.1f}" if line != 0 else "0.0"
+        
+        return {
+            'match': f"{match['home_team']} x {match['away_team']}",
+            'competition': match['competition'],
+            'date': match['date'],
+            'market': f'Handicap {line_str}',
+            'odds': market_odds,
+            'probability': probs['prob_home_cover'],
             'ev': ev,
             'stake': round(stake, 2),
             'potential_return': round(stake * market_odds, 2),

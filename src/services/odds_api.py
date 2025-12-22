@@ -29,7 +29,7 @@ class OddsAPI:
         params = {
             'apiKey': self.api_key,
             'regions': 'us,uk,eu',
-            'markets': 'h2h,totals',
+            'markets': 'h2h,totals,spreads',  # Adicionado spreads
             'oddsFormat': 'decimal'
         }
         
@@ -64,6 +64,8 @@ class OddsAPI:
                         self._extract_totals(market, game_data['markets'])
                     elif market_key == 'h2h':
                         self._extract_h2h(market, game_data['markets'])
+                    elif market_key == 'spreads':
+                        self._extract_spreads(market, game_data['markets'])
             
             formatted.append(game_data)
         
@@ -92,5 +94,19 @@ class OddsAPI:
             else:
                 continue
             
+            if key not in markets_dict or outcome['price'] > markets_dict[key]:
+                markets_dict[key] = outcome['price']
+    
+    def _extract_spreads(self, market: Dict, markets_dict: Dict):
+        """Extrai odds de Spreads/Handicaps"""
+        for outcome in market.get('outcomes', []):
+            point = outcome.get('point')
+            if point is None:
+                continue
+            
+            # Normaliza a key (ex: spread_-1.5 ou spread_1.5)
+            key = f'spread_{point}'
+            
+            # Pega a melhor odd disponível
             if key not in markets_dict or outcome['price'] > markets_dict[key]:
                 markets_dict[key] = outcome['price']

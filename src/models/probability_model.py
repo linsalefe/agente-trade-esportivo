@@ -51,3 +51,37 @@ class ProbabilityModel:
             return True, ev
         
         return False, ev
+    def calculate_handicap(self, home_avg: float, away_avg: float, line: float) -> Dict:
+        """
+        Calcula probabilidade de handicap/spread
+        line: handicap (ex: -1.5 para home, +1.5 para away)
+        """
+        # Estima diferença esperada de gols
+        expected_diff = home_avg - away_avg
+        
+        # Probabilidade do home cobrir o handicap
+        # Se line = -1.5, home precisa ganhar por 2+ gols
+        # Se expected_diff > line, favorece home
+        
+        # Modelo simplificado baseado em distribuição normal
+        # Em produção, usar simulação de Monte Carlo
+        margin = expected_diff - line
+        
+        # Converte margem em probabilidade (aproximação)
+        if margin > 1.5:
+            prob_home = 0.75
+        elif margin > 0.5:
+            prob_home = 0.65
+        elif margin > -0.5:
+            prob_home = 0.55
+        elif margin > -1.5:
+            prob_home = 0.45
+        else:
+            prob_home = 0.35
+        
+        return {
+            'prob_home_cover': prob_home,
+            'prob_away_cover': 1 - prob_home,
+            'expected_diff': expected_diff,
+            'line': line
+        }
