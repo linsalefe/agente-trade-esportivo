@@ -9,14 +9,14 @@ class OddsAPI:
         self.api_key = Config.ODDS_API_KEY
         self.base_url = Config.ODDS_API_BASE_URL
     
-    def get_odds_for_match(self, sport: str = 'soccer_brazil_campeonato') -> List[Dict]:
+    def get_odds_for_match(self, sport: str = 'soccer_epl') -> List[Dict]:
         """Busca odds para jogos"""
         url = f"{self.base_url}/sports/{sport}/odds"
         
         params = {
             'apiKey': self.api_key,
-            'regions': 'br,uk',
-            'markets': 'h2h,totals,btts',
+            'regions': 'us,uk,eu',
+            'markets': 'h2h,totals',
             'oddsFormat': 'decimal'
         }
         
@@ -49,8 +49,8 @@ class OddsAPI:
                     
                     if market_key == 'totals':
                         self._extract_totals(market, game_data['markets'])
-                    elif market_key == 'btts':
-                        self._extract_btts(market, game_data['markets'])
+                    elif market_key == 'h2h':
+                        self._extract_h2h(market, game_data['markets'])
             
             formatted.append(game_data)
         
@@ -70,12 +70,14 @@ class OddsAPI:
                 if key not in markets_dict or outcome['price'] > markets_dict[key]:
                     markets_dict[key] = outcome['price']
     
-    def _extract_btts(self, market: Dict, markets_dict: Dict):
-        """Extrai odds de BTTS"""
+    def _extract_h2h(self, market: Dict, markets_dict: Dict):
+        """Extrai odds de 1X2"""
         for outcome in market.get('outcomes', []):
-            if outcome['name'] == 'Yes':
-                if 'btts_yes' not in markets_dict or outcome['price'] > markets_dict['btts_yes']:
-                    markets_dict['btts_yes'] = outcome['price']
-            elif outcome['name'] == 'No':
-                if 'btts_no' not in markets_dict or outcome['price'] > markets_dict['btts_no']:
-                    markets_dict['btts_no'] = outcome['price']
+            name = outcome['name']
+            if name == 'Draw':
+                key = 'draw'
+            else:
+                continue  # Ignoramos home/away por enquanto
+            
+            if key not in markets_dict or outcome['price'] > markets_dict[key]:
+                markets_dict[key] = outcome['price']

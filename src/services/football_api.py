@@ -32,6 +32,28 @@ class FootballAPI:
             print(f"Erro ao buscar jogos: {e}")
             return []
     
+    def get_matches_next_days(self, days: int = 7) -> List[Dict]:
+        """Busca jogos dos próximos N dias"""
+        if not self.api_key or self.api_key == 'your_api_key_here':
+            return []
+        
+        date_from = datetime.now().strftime('%Y-%m-%d')
+        date_to = (datetime.now() + timedelta(days=days)).strftime('%Y-%m-%d')
+        
+        url = f"{self.base_url}/matches"
+        params = {'dateFrom': date_from, 'dateTo': date_to}
+        
+        try:
+            response = requests.get(url, headers=self.headers, params=params)
+            response.raise_for_status()
+            
+            matches = response.json().get('matches', [])
+            return self._format_matches(matches)
+        
+        except Exception as e:
+            print(f"Erro ao buscar jogos: {e}")
+            return []
+    
     def _format_matches(self, matches: List[Dict]) -> List[Dict]:
         """Formata dados dos jogos"""
         formatted = []
