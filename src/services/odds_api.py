@@ -1,16 +1,27 @@
 import requests
 from typing import List, Dict
 from config.config import Config
+from src.cache.redis_client import RedisCache
+from datetime import datetime
 
 class OddsAPI:
-    """Serviço para buscar odds de diferentes mercados"""
+    """Serviço para buscar odds com cache Redis"""
     
     def __init__(self):
         self.api_key = Config.ODDS_API_KEY
         self.base_url = Config.ODDS_API_BASE_URL
+        self.cache = RedisCache()
     
     def get_odds_for_match(self, sport: str = 'soccer_epl') -> List[Dict]:
-        """Busca odds para jogos"""
+        """Busca odds para jogos (cache: 15 minutos)"""
+        cache_key = f"odds:{sport}:{datetime.now().strftime('%Y-%m-%d-%H')}"
+        
+        # Tenta cache
+        cached = self.cache.get(cache_key)
+        if cached:
+            print(f"📦 Usando cache (odds {sport})")
+            return cached
+        
         url = f"{self.base_url}/sports/{sport}/odds"
         
         params = {
@@ -24,7 +35,12 @@ class OddsAPI:
             response = requests.get(url, params=params)
             response.raise_for_status()
             
-            return self._format_odds(response.json())
+            formatted = self._format_odds(response.json())
+            
+            # Salva no cache (15 minutos)
+            self.cache.set(cache_key, formatted, expire_seconds=900)
+            
+            return formatted
         
         except Exception as e:
             print(f"Erro ao buscar odds: {e}")
@@ -77,7 +93,7 @@ class OddsAPI:
             if name == 'Draw':
                 key = 'draw'
             else:
-                continue  # Ignoramos home/away por enquanto
+                continue
             
             if key not in markets_dict or outcome['price'] > markets_dict[key]:
                 markets_dict[key] = outcome['price']

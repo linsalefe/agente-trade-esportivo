@@ -2,17 +2,27 @@ import requests
 from datetime import datetime, timedelta
 from typing import List, Dict
 from config.config import Config
+from src.cache.redis_client import RedisCache
 
 class FootballAPI:
-    """Serviço para buscar dados de jogos"""
+    """Serviço para buscar dados de jogos com cache Redis"""
     
     def __init__(self):
         self.api_key = Config.FOOTBALL_API_KEY
         self.base_url = Config.FOOTBALL_API_BASE_URL
         self.headers = {'X-Auth-Token': self.api_key}
+        self.cache = RedisCache()
     
     def get_today_matches(self) -> List[Dict]:
-        """Busca jogos de hoje"""
+        """Busca jogos de hoje (cache: 6 horas)"""
+        cache_key = f"matches:today:{datetime.now().strftime('%Y-%m-%d')}"
+        
+        # Tenta cache
+        cached = self.cache.get(cache_key)
+        if cached:
+            print("📦 Usando cache (jogos de hoje)")
+            return cached
+        
         if not self.api_key or self.api_key == 'your_api_key_here':
             return []
         
@@ -26,14 +36,27 @@ class FootballAPI:
             response.raise_for_status()
             
             matches = response.json().get('matches', [])
-            return self._format_matches(matches)
+            formatted = self._format_matches(matches)
+            
+            # Salva no cache (6 horas)
+            self.cache.set(cache_key, formatted, expire_seconds=21600)
+            
+            return formatted
         
         except Exception as e:
             print(f"Erro ao buscar jogos: {e}")
             return []
     
     def get_matches_next_days(self, days: int = 7) -> List[Dict]:
-        """Busca jogos dos próximos N dias"""
+        """Busca jogos dos próximos N dias (cache: 6 horas)"""
+        cache_key = f"matches:next_{days}days:{datetime.now().strftime('%Y-%m-%d')}"
+        
+        # Tenta cache
+        cached = self.cache.get(cache_key)
+        if cached:
+            print(f"📦 Usando cache (próximos {days} dias)")
+            return cached
+        
         if not self.api_key or self.api_key == 'your_api_key_here':
             return []
         
@@ -48,7 +71,12 @@ class FootballAPI:
             response.raise_for_status()
             
             matches = response.json().get('matches', [])
-            return self._format_matches(matches)
+            formatted = self._format_matches(matches)
+            
+            # Salva no cache (6 horas)
+            self.cache.set(cache_key, formatted, expire_seconds=21600)
+            
+            return formatted
         
         except Exception as e:
             print(f"Erro ao buscar jogos: {e}")
@@ -71,7 +99,15 @@ class FootballAPI:
         return formatted
     
     def get_team_stats(self, team_id: int, last_n_games: int = 5) -> Dict:
-        """Busca estatísticas recentes do time"""
+        """Busca estatísticas recentes do time (cache: 24 horas)"""
+        cache_key = f"team_stats:{team_id}:last_{last_n_games}"
+        
+        # Tenta cache
+        cached = self.cache.get(cache_key)
+        if cached:
+            print(f"📦 Usando cache (stats time {team_id})")
+            return cached
+        
         url = f"{self.base_url}/teams/{team_id}/matches"
         params = {'limit': last_n_games}
         
@@ -80,7 +116,12 @@ class FootballAPI:
             response.raise_for_status()
             
             matches = response.json().get('matches', [])
-            return self._calculate_team_stats(matches, team_id)
+            stats = self._calculate_team_stats(matches, team_id)
+            
+            # Salva no cache (24 horas)
+            self.cache.set(cache_key, stats, expire_seconds=86400)
+            
+            return stats
         
         except Exception as e:
             print(f"Erro ao buscar stats do time: {e}")
