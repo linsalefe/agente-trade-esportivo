@@ -46,6 +46,10 @@ class Config:
     ODDS_API_KEY = os.getenv('ODDS_API_KEY')
     ODDS_API_BASE_URL = os.getenv('ODDS_API_BASE_URL')
     
+    # API-Football (api-sports.io)
+    API_FOOTBALL_KEY = os.getenv('API_FOOTBALL_KEY')
+    API_FOOTBALL_BASE_URL = os.getenv('API_FOOTBALL_BASE_URL')
+    
     # Database
     DB_CONFIG = {
         'host': os.getenv('DB_HOST', 'localhost'),

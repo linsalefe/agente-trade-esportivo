@@ -4,6 +4,7 @@ from src.models.bet_history import BetHistory
 from src.models.risk_manager import RiskManager
 from src.models.advanced_stats import AdvancedStats
 from src.services.football_api import FootballAPI
+from src.services.api_football_service import APIFootballService
 from src.services.odds_api import OddsAPI
 from src.utils.validators import OpportunityValidator
 from src.utils.reporter import Reporter
@@ -17,12 +18,13 @@ class BettingAgent:
         self.bankroll_manager = BankrollManager(current_bankroll)
         self.probability_model = ProbabilityModel()
         self.football_api = FootballAPI()
+        self.api_football = APIFootballService()
         self.odds_api = OddsAPI()
         self.bet_history = BetHistory()
         self.risk_manager = RiskManager(current_bankroll, self.bankroll_manager.phase)
     
     def analyze_today_opportunities(self) -> List[Dict]:
-        """Analisa todas oportunidades do dia"""
+        """Analisa todas oportunidades do dia agregando múltiplas APIs"""
         from config.config import Config
         
         print("🔍 Buscando jogos de hoje...")
@@ -33,8 +35,25 @@ class BettingAgent:
             print("✅ APIs configuradas. Usando dados reais...")
             
             try:
-                # Busca jogos dos próximos 3 dias
-                matches = self.football_api.get_matches_next_days(3)
+                all_matches = []
+                
+                # 1. Busca da Football-Data.org
+                print("📊 Buscando Football-Data.org...")
+                matches_fd = self.football_api.get_matches_next_days(3)
+                if matches_fd:
+                    print(f"   ✅ {len(matches_fd)} jogos (Football-Data)")
+                    all_matches.extend(matches_fd)
+                
+                # 2. Busca da API-Football
+                print("📊 Buscando API-Football.com...")
+                matches_af = self.api_football.get_fixtures_next_days(3)
+                if matches_af:
+                    print(f"   ✅ {len(matches_af)} jogos (API-Football)")
+                    all_matches.extend(matches_af)
+                
+                # 3. Remove duplicatas (mesmo jogo em ambas APIs)
+                matches = self._deduplicate_matches(all_matches)
+                print(f"📊 Total após deduplicação: {len(matches)} jogos")
                 
                 if not matches:
                     if Config.ENVIRONMENT == 'production':
@@ -47,8 +66,6 @@ class BettingAgent:
                         matches = get_mock_matches()
                         odds_data = get_mock_odds()
                 else:
-                    print(f"📊 Encontrados {len(matches)} jogos reais")
-                    
                     # Busca odds reais
                     print("💰 Buscando odds reais...")
                     odds_data = []
@@ -112,6 +129,23 @@ class BettingAgent:
         opportunities.sort(key=lambda x: x['ev'], reverse=True)
         
         return opportunities
+    
+    def _deduplicate_matches(self, matches: List[Dict]) -> List[Dict]:
+        """Remove jogos duplicados (mesmo jogo de APIs diferentes)"""
+        seen = set()
+        unique = []
+        
+        for match in matches:
+            # Cria chave única baseada nos times
+            home = match['home_team'].lower().strip()
+            away = match['away_team'].lower().strip()
+            key = f"{home}|{away}"
+            
+            if key not in seen:
+                seen.add(key)
+                unique.append(match)
+        
+        return unique
     
     def detect_multiples(self, opportunities: List[Dict]) -> List[Dict]:
         """Detecta múltiplas estratégicas"""
