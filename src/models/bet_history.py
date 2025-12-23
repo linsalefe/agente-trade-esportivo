@@ -139,9 +139,35 @@ class BetHistory:
             }
     
     def get_recent_bets(self, n: int = 10) -> List[Dict]:
-        """Retorna as N apostas mais recentes"""
-        with get_db() as db:
-            query = text("SELECT * FROM bets ORDER BY timestamp DESC LIMIT :limit")
-            rows = db.execute(query, {'limit': n}).fetchall()
-            
-            return [dict(row._mapping) for row in rows]
+        """Retorna as últimas N apostas"""
+        query = """
+        SELECT bet_id, match, market, odds, stake, status, phase, timestamp,
+               CASE 
+                   WHEN status = 'won' THEN (odds * stake) - stake
+                   WHEN status = 'lost' THEN -stake
+                   WHEN status = 'void' THEN 0
+                   ELSE NULL
+               END as result
+        FROM bets 
+        ORDER BY timestamp DESC 
+        LIMIT %s
+        """
+        
+        self.cursor.execute(query, (n,))
+        rows = self.cursor.fetchall()
+        
+        bets = []
+        for row in rows:
+            bets.append({
+                'bet_id': row[0],
+                'match': row[1],
+                'market': row[2],
+                'odds': row[3],
+                'stake': row[4],
+                'status': row[5],
+                'phase': row[6],
+                'timestamp': row[7],
+                'result': row[8]  # Resultado calculado
+            })
+        
+        return bets
