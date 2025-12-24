@@ -69,9 +69,9 @@ class OddsAPI:
     def get_odds_for_sport(self, sport: str) -> List[Dict]:
         """
         Busca odds para uma liga específica
-        Cache: 15 minutos
+        Cache: 12 HORAS (economia de créditos)
         """
-        cache_key = f"odds:{sport}:{datetime.now().strftime('%Y-%m-%d-%H-%M')}"
+        cache_key = f"odds:{sport}:{datetime.now().strftime('%Y-%m-%d')}"
 
         cached = self.cache.get(cache_key)
         if cached:
@@ -94,7 +94,7 @@ class OddsAPI:
         response.raise_for_status()
 
         formatted = self._format_odds(response.json())
-        self.cache.set(cache_key, formatted, expire_seconds=900)
+        self.cache.set(cache_key, formatted, expire_seconds=43200)  # 12 HORAS
 
         return formatted
 
@@ -151,6 +151,7 @@ class OddsAPI:
         return formatted
 
     def _extract_totals(self, market: Dict, markets_dict: Dict):
+        """Extrai Over e Under"""
         for outcome in market.get("outcomes", []):
             point = outcome.get("point", 2.5)
             price = outcome.get("price")
@@ -165,24 +166,27 @@ class OddsAPI:
             if price is None:
                 continue
 
+            # Pega a melhor odd (maior)
             if key not in markets_dict or price > markets_dict[key]:
                 markets_dict[key] = price
 
     def _extract_h2h(self, market: Dict, markets_dict: Dict):
+        """Extrai 1X2 (casa, empate, fora)"""
         for outcome in market.get("outcomes", []):
-            if outcome.get("name") == "Draw":
-                key = "draw"
-            else:
-                continue
-
+            name = outcome.get("name", "")
             price = outcome.get("price")
+            
             if price is None:
                 continue
-
-            if key not in markets_dict or price > markets_dict[key]:
-                markets_dict[key] = price
+            
+            # Extrai empate (pode ser usado futuramente)
+            if name == "Draw":
+                key = "draw"
+                if key not in markets_dict or price > markets_dict[key]:
+                    markets_dict[key] = price
 
     def _extract_spreads(self, market: Dict, markets_dict: Dict):
+        """Extrai Handicaps/Spreads"""
         for outcome in market.get("outcomes", []):
             point = outcome.get("point")
             price = outcome.get("price")
@@ -191,5 +195,6 @@ class OddsAPI:
                 continue
 
             key = f"spread_{point}"
+            # Pega a melhor odd (maior)
             if key not in markets_dict or price > markets_dict[key]:
                 markets_dict[key] = price

@@ -5,6 +5,8 @@ from src.models.risk_manager import RiskManager
 from src.models.advanced_stats import AdvancedStats
 from src.services.football_api import FootballAPI
 from src.services.api_football_service import APIFootballService
+from src.utils.daily_cache import DailyCache
+from src.services.team_matcher import TeamMatcher
 from src.services.odds_api import OddsAPI
 from src.utils.validators import OpportunityValidator
 from src.utils.reporter import Reporter
@@ -14,7 +16,21 @@ from typing import List, Dict
 class BettingAgent:
     """Agente principal que orquestra análises e sugestões"""
     
+    # 🎯 LIGAS OTIMIZADAS PARA MÁXIMO LUCRO
+    PRIORITY_LEAGUES = [
+        'soccer_epl',                      # Premier League (Inglaterra)
+        'soccer_efl_champ',                # Championship (Inglaterra) ⭐ MELHOR VALUE
+        'soccer_spain_la_liga',            # La Liga (Espanha)
+        'soccer_germany_bundesliga',       # Bundesliga (Alemanha)
+        'soccer_brazil_campeonato',        # Brasileirão Série A ⭐ ALTA INEFICIÊNCIA
+        'soccer_italy_serie_a',            # Serie A (Itália)
+        'soccer_portugal_primeira_liga',   # Primeira Liga (Portugal)
+        'soccer_germany_bundesliga2'       # Bundesliga 2 (Alemanha) ⭐ BOM VALUE
+    ]
     def __init__(self, current_bankroll: float):
+        """Inicializa o agente com a banca atual"""
+        from src.models.bankroll_manager import BankrollManager
+        
         self.bankroll_manager = BankrollManager(current_bankroll)
         self.probability_model = ProbabilityModel()
         self.football_api = FootballAPI()
@@ -22,111 +38,148 @@ class BettingAgent:
         self.odds_api = OddsAPI()
         self.bet_history = BetHistory()
         self.risk_manager = RiskManager(current_bankroll, self.bankroll_manager.phase)
-    
+        
     def analyze_today_opportunities(self) -> List[Dict]:
-        """Analisa todas oportunidades do dia agregando múltiplas APIs"""
+        """Analisa todas oportunidades do dia usando The Odds API + API-Football"""
         from config.config import Config
         
-        print("🔍 Buscando jogos de hoje...")
+        print("🔍 Buscando oportunidades de hoje...")
         
-        # Tenta usar APIs reais
-        api_key = self.football_api.api_key
-        if api_key and api_key != 'your_api_key_here':
-            print("✅ APIs configuradas. Usando dados reais...")
-            
+        # 🎯 VERIFICA CACHE DIÁRIO PRIMEIRO
+        cached_data = DailyCache.load_today_data()
+        if cached_data:
+            print(f"   ✅ Já buscamos hoje! ({cached_data['matches_count']} jogos, {cached_data['leagues_count']} ligas)")
+            print(f"   ✅ {len(cached_data['opportunities'])} oportunidades em cache")
+            return cached_data['opportunities']
+        
+        print("   🆕 Primeira busca do dia - consultando APIs...")
+        
+        # 1. Busca jogos da API-Football (para ter IDs e stats)
+        print("📊 Buscando jogos da API-Football...")
+        api_football_matches = self.api_football.get_fixtures_next_days(1)  # Apenas hoje
+        print(f"   ✅ {len(api_football_matches)} jogos encontrados (API-Football)")
+        
+        # 2. Busca odds da The Odds API (ligas prioritárias)
+        print(f"💰 Buscando odds das {len(self.PRIORITY_LEAGUES)} ligas prioritárias...")
+        print(f"   📋 Ligas: Championship, Premier, La Liga, Bundesliga, Brasileirão, Serie A, Portugal, Bundesliga 2")
+        
+        all_matches_with_odds = []
+        leagues_found = 0
+        
+        for sport in self.PRIORITY_LEAGUES:
             try:
-                all_matches = []
-                
-                # 1. Busca da Football-Data.org
-                print("📊 Buscando Football-Data.org...")
-                matches_fd = self.football_api.get_matches_next_days(3)
-                if matches_fd:
-                    print(f"   ✅ {len(matches_fd)} jogos (Football-Data)")
-                    all_matches.extend(matches_fd)
-                
-                # 2. Busca da API-Football
-                print("📊 Buscando API-Football.com...")
-                matches_af = self.api_football.get_fixtures_next_days(3)
-                if matches_af:
-                    print(f"   ✅ {len(matches_af)} jogos (API-Football)")
-                    all_matches.extend(matches_af)
-                
-                # 3. Remove duplicatas (mesmo jogo em ambas APIs)
-                matches = self._deduplicate_matches(all_matches)
-                print(f"📊 Total após deduplicação: {len(matches)} jogos")
-                
-                if not matches:
-                    if Config.ENVIRONMENT == 'production':
-                        print("❌ ERRO: Nenhum jogo encontrado e sistema está em PRODUÇÃO")
-                        print("❌ NÃO é seguro operar sem dados reais. Abortando...")
-                        return []
-                    else:
-                        print("⚠️  Nenhum jogo encontrado. Usando dados simulados (DEVELOPMENT)...")
-                        from src.utils.mock_data import get_mock_matches, get_mock_odds
-                        matches = get_mock_matches()
-                        odds_data = get_mock_odds()
-                else:
-                    # Busca odds reais
-                    print("💰 Buscando odds reais...")
-                    odds_data = []
-                    
-                    # Busca odds de múltiplas ligas
-                    sports = ['soccer_epl', 'soccer_spain_la_liga', 'soccer_portugal_primeira_liga']
-                    for sport in sports:
-                        odds = self.odds_api.get_odds_for_match(sport)
-                        odds_data.extend(odds)
-                    
-                    if not odds_data:
-                        if Config.ENVIRONMENT == 'production':
-                            print("❌ ERRO: Nenhuma odd encontrada e sistema está em PRODUÇÃO")
-                            print("❌ NÃO é seguro operar sem odds reais. Abortando...")
-                            return []
-                        else:
-                            print("⚠️  Nenhuma odd encontrada. Usando dados simulados (DEVELOPMENT)...")
-                            from src.utils.mock_data import get_mock_odds
-                            odds_data = get_mock_odds()
-                    else:
-                        print(f"💰 {len(odds_data)} jogos com odds disponíveis")
-                        
+                matches = self.odds_api.get_odds_for_match(sport)
+                if matches:
+                    all_matches_with_odds.extend(matches)
+                    leagues_found += 1
             except Exception as e:
-                print(f"❌ ERRO ao buscar dados das APIs: {e}")
-                if Config.ENVIRONMENT == 'production':
-                    print("❌ Sistema em PRODUÇÃO. Abortando por segurança...")
-                    return []
-                else:
-                    print("⚠️  Usando dados simulados (DEVELOPMENT)...")
-                    from src.utils.mock_data import get_mock_matches, get_mock_odds
-                    matches = get_mock_matches()
-                    odds_data = get_mock_odds()
-        else:
+                print(f"   ⚠️ Erro ao buscar {sport}: {e}")
+                continue
+        
+        print(f"   ✅ {leagues_found} ligas carregadas")
+        print(f"   ✅ {len(all_matches_with_odds)} jogos com odds disponíveis")
+        
+        if not all_matches_with_odds:
             if Config.ENVIRONMENT == 'production':
-                print("❌ ERRO: APIs não configuradas e sistema está em PRODUÇÃO")
-                print("❌ Configure as API keys no .env antes de operar. Abortando...")
+                print("❌ ERRO: Nenhum jogo com odds encontrado e sistema está em PRODUÇÃO")
                 return []
             else:
-                print("⚠️  API não configurada. Usando dados simulados para teste (DEVELOPMENT)...")
+                print("⚠️  Nenhum jogo encontrado. Usando dados simulados (DEVELOPMENT)...")
                 from src.utils.mock_data import get_mock_matches, get_mock_odds
                 matches = get_mock_matches()
                 odds_data = get_mock_odds()
+                # Processa dados simulados (fallback antigo)
+                opportunities = []
+                phase_info = self.bankroll_manager.get_phase_info()
+                for match in matches:
+                    match_odds = self._find_match_odds(match, odds_data)
+                    if not match_odds:
+                        continue
+                    home_stats, away_stats = self._get_real_team_stats(match)
+                    opps = self._analyze_match_markets(match, match_odds, phase_info, home_stats, away_stats)
+                    opportunities.extend(opps)
+                opportunities = self._validate_opportunities(opportunities, phase_info)
+                opportunities.sort(key=lambda x: x['ev'], reverse=True)
+                return opportunities
+        
+        # 3. Faz matching entre The Odds API e API-Football
+        print(f"\n🔗 Fazendo matching entre APIs...")
         
         opportunities = []
         phase_info = self.bankroll_manager.get_phase_info()
         
-        for match in matches:
-            match_odds = self._find_match_odds(match, odds_data)
+        matched_count = 0
+        total_processed = 0
+        
+        for match_with_odds in all_matches_with_odds:
+            total_processed += 1
             
-            if not match_odds:
-                continue
+            # Tenta fazer match com API-Football
+            matched_game = TeamMatcher.match_teams(
+                match_with_odds['home_team'],
+                match_with_odds['away_team'],
+                api_football_matches,
+                threshold=0.6  # 60% de similaridade mínima
+            )
             
-            # Analisa cada mercado
-            opps = self._analyze_match_markets(match, match_odds, phase_info)
+            if matched_game:
+                matched_count += 1
+                
+                # Usa dados do match (com IDs para buscar stats)
+                match = {
+                    'home_team': match_with_odds['home_team'],
+                    'away_team': match_with_odds['away_team'],
+                    'competition': match_with_odds.get('competition', matched_game.get('competition', 'N/A')),
+                    'date': match_with_odds.get('commence_time', ''),
+                    'home_team_id': matched_game.get('home_team_id'),
+                    'away_team_id': matched_game.get('away_team_id'),
+                    'league_id': matched_game.get('league_id')
+                }
+                
+                if total_processed <= 3:  # Debug dos primeiros 3
+                    print(f"   ✅ Match: {match_with_odds['home_team']} vs {match_with_odds['away_team']}")
+                    print(f"      → {matched_game.get('home_team')} vs {matched_game.get('away_team')}")
+                    print(f"      Score: {matched_game.get('match_score', 0):.2f} | IDs: {match['home_team_id']}, {match['away_team_id']}")
+            else:
+                # Sem match - usa dados da The Odds API sem IDs
+                match = {
+                    'home_team': match_with_odds['home_team'],
+                    'away_team': match_with_odds['away_team'],
+                    'competition': match_with_odds.get('competition', 'N/A'),
+                    'date': match_with_odds.get('commence_time', ''),
+                    'home_team_id': None,
+                    'away_team_id': None,
+                    'league_id': None
+                }
+                
+                if total_processed <= 3:  # Debug dos primeiros 3
+                    print(f"   ❌ Sem match: {match_with_odds['home_team']} vs {match_with_odds['away_team']}")
+            
+            # Busca estatísticas reais (vai usar APIs se tiver IDs, senão fallback)
+            home_stats, away_stats = self._get_real_team_stats(match)
+            
+            # Analisa mercados (match_with_odds já tem as odds)
+            opps = self._analyze_match_markets(match, match_with_odds, phase_info, home_stats, away_stats)
             opportunities.extend(opps)
+        
+        print(f"\n📊 RESULTADO DO MATCHING:")
+        print(f"   ✅ {matched_count}/{total_processed} jogos com match ({matched_count/total_processed*100:.1f}%)")
+        print(f"   ✅ {len(opportunities)} oportunidades encontradas (antes da validação)")
         
         # Valida oportunidades
         opportunities = self._validate_opportunities(opportunities, phase_info)
         
+        print(f"   ✅ {len(opportunities)} oportunidades validadas")
+        
         # Ordena por EV
         opportunities.sort(key=lambda x: x['ev'], reverse=True)
+        
+        # 🎯 SALVA NO CACHE DIÁRIO
+        DailyCache.save_today_data(
+            opportunities=opportunities,
+            matches_count=total_processed,
+            leagues_count=leagues_found
+        )
         
         return opportunities
     
@@ -146,7 +199,6 @@ class BettingAgent:
                 unique.append(match)
         
         return unique
-    
     def detect_multiples(self, opportunities: List[Dict]) -> List[Dict]:
         """Detecta múltiplas estratégicas"""
         # Só sugere múltiplas em fase 1 e 2 (alavancagem agressiva)
@@ -199,70 +251,211 @@ class BettingAgent:
     
     def _find_match_odds(self, match: Dict, odds_data: List[Dict]) -> Dict:
         """Encontra odds para o jogo específico"""
+        # DEBUG: Mostra apenas os primeiros 3 matchings
+        if not hasattr(self, '_match_debug_count'):
+            self._match_debug_count = 0
+        
+        if self._match_debug_count < 3:
+            print(f"\n🔍 Tentando matchear: {match['home_team']} vs {match['away_team']}")
+            self._match_debug_count += 1
+        
         for odds in odds_data:
             home_match = odds['home_team'].lower() in match['home_team'].lower()
             away_match = odds['away_team'].lower() in match['away_team'].lower()
             
+            if self._match_debug_count <= 3 and (home_match or away_match):
+                print(f"   🎯 Candidato: {odds['home_team']} vs {odds['away_team']}")
+                print(f"      Home match: {home_match} | Away match: {away_match}")
+            
             if home_match or away_match:
                 return odds
+        
+        if self._match_debug_count <= 3:
+            print(f"   ❌ Nenhuma odd encontrada para este jogo")
+            print(f"   📋 Exemplo de odd disponível: {odds_data[0]['home_team']} vs {odds_data[0]['away_team']}")
+        
         return {}
     
-    def _analyze_match_markets(self, match: Dict, odds: Dict, phase_info: Dict) -> List[Dict]:
+    def _get_real_team_stats(self, match: Dict) -> tuple:
+        """
+        Busca estatísticas reais dos times via API-Football
+        Retorna (home_stats, away_stats)
+        """
+        print(f"\n🔎 _get_real_team_stats CHAMADO para: {match.get('home_team')} vs {match.get('away_team')}")
+        # Tenta buscar stats reais
+        home_team_id = match.get('home_team_id')
+        away_team_id = match.get('away_team_id')
+        league_id = match.get('league_id')
+        print(f"   📌 IDs encontrados: home_id={home_team_id}, away_id={away_team_id}, league_id={league_id}")
+
+        home_stats_real = None
+        away_stats_real = None
+        
+        if home_team_id and away_team_id and league_id:
+            # Temporada atual (2024 porque a temporada europeia 2024/25 usa 2024)
+            current_season = 2024
+            
+            print(f"   🔍 Buscando stats reais: {match['home_team']} vs {match['away_team']}")
+            
+            # Busca estatísticas do time mandante
+            home_api_stats = self.api_football.get_team_statistics(home_team_id, league_id, current_season)
+            # Busca forma recente do mandante
+            home_form = self.api_football.get_team_form(home_team_id, 5)
+            
+            # Busca estatísticas do time visitante
+            away_api_stats = self.api_football.get_team_statistics(away_team_id, league_id, current_season)
+            # Busca forma recente do visitante
+            away_form = self.api_football.get_team_form(away_team_id, 5)
+            
+            # Se conseguiu dados reais, usa eles
+            if home_api_stats and away_api_stats:
+                print(f"   ✅ Stats reais carregadas!")
+                print(f"      Home: {home_api_stats['home_avg_scored']:.2f} gols (casa) | Forma: {home_form}")
+                print(f"      Away: {away_api_stats['away_avg_scored']:.2f} gols (fora) | Forma: {away_form}")
+                
+                home_team_data = {
+                    'base_avg_scored': home_api_stats.get('home_avg_scored', 1.5),
+                    'base_avg_conceded': home_api_stats.get('home_avg_conceded', 1.2),
+                    'recent_form': home_form,
+                    'is_home': True
+                }
+                
+                away_team_data = {
+                    'base_avg_scored': away_api_stats.get('away_avg_scored', 1.3),
+                    'base_avg_conceded': away_api_stats.get('away_avg_conceded', 1.4),
+                    'recent_form': away_form,
+                    'is_home': False
+                }
+                
+                home_stats_real = self._calculate_adjusted_stats(home_team_data)
+                away_stats_real = self._calculate_adjusted_stats(away_team_data)
+        
+        # Se não conseguiu stats reais, usa fallback
+        if not home_stats_real or not away_stats_real:
+            print(f"   ⚠️  Stats simuladas (API não retornou dados)")
+            
+            home_team_data = {
+                'base_avg_scored': 1.8,
+                'base_avg_conceded': 1.2,
+                'recent_form': ['W', 'W', 'W', 'D', 'W'],
+                'is_home': True
+            }
+            
+            away_team_data = {
+                'base_avg_scored': 1.5,
+                'base_avg_conceded': 1.3,
+                'recent_form': ['W', 'D', 'L', 'W', 'D'],
+                'is_home': False
+            }
+            
+            home_stats_real = self._calculate_adjusted_stats(home_team_data)
+            away_stats_real = self._calculate_adjusted_stats(away_team_data)
+        
+        return home_stats_real, away_stats_real
+    
+    def _calculate_adjusted_stats(self, team_data: Dict) -> Dict:
+        """Calcula estatísticas ajustadas com forma recente e mando de campo"""
+        base_scored = team_data.get('base_avg_scored', 1.5)
+        base_conceded = team_data.get('base_avg_conceded', 1.3)
+        recent_form = team_data.get('recent_form', [])
+        is_home = team_data.get('is_home', False)
+        
+        # Ajuste por forma recente (últimos 5 jogos)
+        form_adjustment = 1.0
+        if recent_form:
+            wins = recent_form.count('W')
+            losses = recent_form.count('L')
+            if wins >= 3:
+                form_adjustment = 1.15  # +15% se boa forma
+            elif losses >= 3:
+                form_adjustment = 0.85  # -15% se má forma
+        
+        # Ajuste por mando de campo
+        home_adjustment = 1.1 if is_home else 0.9
+        
+        # Aplica ajustes
+        adjusted_scored = base_scored * form_adjustment * home_adjustment
+        adjusted_conceded = base_conceded / form_adjustment / home_adjustment
+        
+        return {
+            'avg_scored': adjusted_scored,
+            'avg_conceded': adjusted_conceded
+        }
+    
+    def _analyze_match_markets(self, match: Dict, odds: Dict, phase_info: Dict, 
+                               home_stats: Dict, away_stats: Dict) -> List[Dict]:
         """Analisa mercados disponíveis do jogo"""
         opportunities = []
         markets = odds.get('markets', {})
         
-        # Stats com forma recente e mando (simuladas - em produção viriam da API)
-        home_team_data = {
-            'base_avg_scored': 1.8,
-            'base_avg_conceded': 1.2,
-            'recent_form': ['W', 'W', 'W', 'D', 'W'],  # Simula boa forma
-            'is_home': True
-        }
+        # DEBUG: Força debug nos primeiros 5 jogos
+        if not hasattr(self, '_debug_count'):
+            self._debug_count = 0
         
-        away_team_data = {
-            'base_avg_scored': 1.5,
-            'base_avg_conceded': 1.3,
-            'recent_form': ['W', 'D', 'L', 'D', 'W'],  # Simula forma regular
-            'is_home': False
-        }
+        should_debug = self._debug_count < 5
+        self._debug_count += 1
         
-        # Calcula stats melhoradas
-        home_stats = AdvancedStats.get_enhanced_stats(home_team_data)
-        away_stats = AdvancedStats.get_enhanced_stats(away_team_data)
+        if should_debug:
+            print(f"\n🎯 DEBUG #{self._debug_count}: {match['home_team']} x {match['away_team']}")
+            print(f"   📊 Home: {home_stats['avg_scored']:.2f} gols/jogo | Away: {away_stats['avg_scored']:.2f} gols/jogo")
+            print(f"   📊 EV mínimo exigido: {phase_info['min_ev']}%")
         
-        # Analisa Over 2.5
+        # 1. Over 2.5
         if 'over_2.5' in markets:
-            opp = self._analyze_over_under(match, odds, home_stats, away_stats, 
-                                          2.5, markets['over_2.5'], phase_info)
+            opp = self._analyze_over(match, odds, home_stats, away_stats, 2.5, markets['over_2.5'], phase_info)
             if opp:
                 opportunities.append(opp)
+                if should_debug:
+                    print(f"   ✅ Over 2.5 @ {markets['over_2.5']} - EV: {opp['ev']:.1f}% - Prob: {opp['probability']*100:.1f}%")
+            elif should_debug:
+                # Calcula manualmente para debug
+                probs = self.probability_model.calculate_over_under(home_stats['avg_scored'], away_stats['avg_scored'], 2.5)
+                is_valid, ev = self.probability_model.validate_opportunity(probs['prob_over'], markets['over_2.5'], phase_info['min_ev'])
+                print(f"   ❌ Over 2.5 @ {markets['over_2.5']} - EV: {ev:.1f}% - Prob: {probs['prob_over']*100:.1f}%")
         
-        # Analisa Over 2.0
-        if 'over_2.0' in markets:
-            opp = self._analyze_over_under(match, odds, home_stats, away_stats, 
-                                          2.0, markets['over_2.0'], phase_info)
+        # 2. Under 2.5
+        if 'under_2.5' in markets:
+            opp = self._analyze_under(match, odds, home_stats, away_stats, 2.5, markets['under_2.5'], phase_info)
             if opp:
                 opportunities.append(opp)
+                if should_debug:
+                    print(f"   ✅ Under 2.5 @ {markets['under_2.5']} - EV: {opp['ev']:.1f}% - Prob: {opp['probability']*100:.1f}%")
+            elif should_debug:
+                probs = self.probability_model.calculate_over_under(home_stats['avg_scored'], away_stats['avg_scored'], 2.5)
+                is_valid, ev = self.probability_model.validate_opportunity(probs['prob_under'], markets['under_2.5'], phase_info['min_ev'])
+                print(f"   ❌ Under 2.5 @ {markets['under_2.5']} - EV: {ev:.1f}% - Prob: {probs['prob_under']*100:.1f}%")
         
-        # Analisa Spreads/Handicaps
-        for key, value in markets.items():
-            if key.startswith('spread_'):
-                try:
-                    line = float(key.replace('spread_', ''))
-                    opp = self._analyze_handicap(match, odds, home_stats, away_stats,
-                                                 line, value, phase_info)
-                    if opp:
-                        opportunities.append(opp)
-                except:
-                    pass
+        # 3. Handicaps
+        handicap_count = 0
+        for spread_key in markets.keys():
+            if spread_key.startswith('spread_'):
+                parts = spread_key.split('_')
+                if len(parts) >= 2:
+                    try:
+                        handicap = float(parts[1])
+                        opp = self._analyze_handicap(match, odds, home_stats, away_stats, handicap, markets[spread_key], phase_info)
+                        if opp:
+                            opportunities.append(opp)
+                            if should_debug and handicap_count < 2:
+                                print(f"   ✅ Handicap {handicap:+.1f} @ {markets[spread_key]} - EV: {opp['ev']:.1f}%")
+                                handicap_count += 1
+                    except ValueError:
+                        continue
+        
+        # 4. BTTS (se disponível)
+        if 'btts_yes' in markets:
+            opp = self._analyze_btts(match, odds, home_stats, away_stats, markets['btts_yes'], phase_info)
+            if opp:
+                opportunities.append(opp)
+                if should_debug:
+                    print(f"   ✅ BTTS @ {markets['btts_yes']} - EV: {opp['ev']:.1f}%")
         
         return opportunities
     
-    def _analyze_over_under(self, match: Dict, odds: Dict, home_stats: Dict, 
-                           away_stats: Dict, line: float, market_odds: float, 
-                           phase_info: Dict) -> Dict:
-        """Analisa oportunidade de Over/Under"""
+    def _analyze_over(self, match: Dict, odds: Dict, home_stats: Dict, 
+                     away_stats: Dict, line: float, market_odds: float, 
+                     phase_info: Dict) -> Dict:
+        """Analisa oportunidade de Over"""
         probs = self.probability_model.calculate_over_under(
             home_stats['avg_scored'], 
             away_stats['avg_scored'], 
@@ -284,13 +477,13 @@ class BettingAgent:
             ev
         )
         
-        # Aplica ajuste de risco se necessário
+        # Aplica ajuste de risco
         stake_adjustment = self.risk_manager.get_stake_adjustment()
         stake = stake * stake_adjustment
         
         return {
             'match': f"{match['home_team']} x {match['away_team']}",
-            'competition': match['competition'],
+            'competition': match.get('competition', 'N/A'),
             'date': match['date'],
             'market': f'Over {line}',
             'odds': market_odds,
@@ -300,6 +493,50 @@ class BettingAgent:
             'potential_return': round(stake * market_odds, 2),
             'phase': phase_info['phase']
         }
+    
+    def _analyze_under(self, match: Dict, odds: Dict, home_stats: Dict, 
+                      away_stats: Dict, line: float, market_odds: float, 
+                      phase_info: Dict) -> Dict:
+        """Analisa oportunidade de Under"""
+        probs = self.probability_model.calculate_over_under(
+            home_stats['avg_scored'], 
+            away_stats['avg_scored'], 
+            line
+        )
+        
+        # Usa probabilidade de UNDER
+        is_valid, ev = self.probability_model.validate_opportunity(
+            probs['prob_under'], 
+            market_odds, 
+            phase_info['min_ev']
+        )
+        
+        if not is_valid:
+            return None
+        
+        stake = self.bankroll_manager.calculate_stake(
+            probs['prob_under'], 
+            market_odds, 
+            ev
+        )
+        
+        # Aplica ajuste de risco
+        stake_adjustment = self.risk_manager.get_stake_adjustment()
+        stake = stake * stake_adjustment
+        
+        return {
+            'match': f"{match['home_team']} x {match['away_team']}",
+            'competition': match.get('competition', 'N/A'),
+            'date': match['date'],
+            'market': f'Under {line}',
+            'odds': market_odds,
+            'probability': probs['prob_under'],
+            'ev': ev,
+            'stake': round(stake, 2),
+            'potential_return': round(stake * market_odds, 2),
+            'phase': phase_info['phase']
+        }
+    
     def _analyze_handicap(self, match: Dict, odds: Dict, home_stats: Dict, 
                          away_stats: Dict, line: float, market_odds: float, 
                          phase_info: Dict) -> Dict:
@@ -333,7 +570,7 @@ class BettingAgent:
         
         return {
             'match': f"{match['home_team']} x {match['away_team']}",
-            'competition': match['competition'],
+            'competition': match.get('competition', 'N/A'),
             'date': match['date'],
             'market': f'Handicap {line_str}',
             'odds': market_odds,
@@ -346,7 +583,7 @@ class BettingAgent:
     
     def _analyze_btts(self, match: Dict, odds: Dict, home_stats: Dict, 
                      away_stats: Dict, market_odds: float, phase_info: Dict) -> Dict:
-        """Analisa oportunidade de BTTS"""
+        """Analisa oportunidade de BTTS (Both Teams To Score)"""
         prob_btts = self.probability_model.calculate_btts(
             home_stats['avg_scored'],
             home_stats['avg_conceded'],
@@ -371,7 +608,7 @@ class BettingAgent:
         
         return {
             'match': f"{match['home_team']} x {match['away_team']}",
-            'competition': match['competition'],
+            'competition': match.get('competition', 'N/A'),
             'date': match['date'],
             'market': 'BTTS (Ambas Marcam)',
             'odds': market_odds,

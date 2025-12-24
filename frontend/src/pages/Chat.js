@@ -17,7 +17,7 @@ import SendIcon from '@mui/icons-material/Send';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import PersonIcon from '@mui/icons-material/Person';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
-import { sendChatMessage, getOpportunities, getStatistics, getCurrentPhase } from '../services/api';
+import { sendChatMessage } from '../services/api';
 
 const Chat = () => {
   const [messages, setMessages] = useState([
@@ -28,35 +28,10 @@ const Chat = () => {
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [context, setContext] = useState(null);
   const messagesEndRef = useRef(null);
   
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-
-  useEffect(() => {
-    loadContext();
-  }, []);
-
-  const loadContext = async () => {
-    try {
-      const [opportunities, stats, phase] = await Promise.all([
-        getOpportunities(100),
-        getStatistics(),
-        getCurrentPhase(),
-      ]);
-      
-      setContext({
-        bankroll: phase.bankroll,
-        phase: phase.phase,
-        opportunities: opportunities.opportunities?.slice(0, 5) || [],
-        multiples: opportunities.multiples?.slice(0, 2) || [],
-        stats: stats,
-      });
-    } catch (error) {
-      console.error('Erro ao carregar contexto:', error);
-    }
-  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -75,17 +50,12 @@ const Chat = () => {
     setLoading(true);
 
     try {
-      // Envia contexto se a pergunta for relevante
-      const needsContext = input.toLowerCase().includes('jogo') ||
-                          input.toLowerCase().includes('aposta') ||
-                          input.toLowerCase().includes('hoje') ||
-                          input.toLowerCase().includes('oportunidade') ||
-                          input.toLowerCase().includes('múltipla');
-      
-      const response = await sendChatMessage(input, needsContext ? context : null);
+      // ✅ CORRIGIDO: Não envia context, deixa o backend construir automaticamente
+      const response = await sendChatMessage(input);
       const assistantMessage = { role: 'assistant', content: response.message };
       setMessages((prev) => [...prev, assistantMessage]);
     } catch (error) {
+      console.error('Erro no chat:', error);
       const errorMessage = {
         role: 'assistant',
         content: 'Desculpe, ocorreu um erro. Tente novamente. 😔',

@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict, List, Any
+from datetime import datetime
 from dotenv import load_dotenv
 
 from src.agents.betting_agent import BettingAgent
@@ -10,13 +11,15 @@ from src.models.bet_history import BetHistory
 
 load_dotenv()
 
+# Inicializa serviço LLM
+llm_service = LLMService()
+
 app = FastAPI(title="Value Betting API")
 
 
 # =========================
 # CORS
 # =========================
-# Dica: se você usa Vite, geralmente é 5173. Se é CRA, geralmente é 3000.
 ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
@@ -57,47 +60,52 @@ class BetRequest(BaseModel):
 # Helpers
 # =========================
 def _needs_context(message: str) -> bool:
-    """Heurística simples para decidir quando vale anexar contexto automático."""
-    m = (message or "").lower()
-    keywords = [
-        "jogo", "jogos", "hoje", "amanhã",
-        "oportunidade", "oportunidades",
-        "aposta", "apostas",
-        "odd", "odds",
-        "múltipla", "multipla", "múltiplas", "multiplas",
-        "value", "ev",
-        "stake", "banca", "fase",
-        "quais são", "me diga", "me mostra",
+    """Detecta se mensagem precisa de contexto de oportunidades"""
+    m = message.lower()
+    
+    # Keywords que indicam pedido de oportunidades
+    opportunity_keywords = [
+        "jogo", "jogos", "hoje", "amanhã", "amanha",
+        "oportunidade", "oportunidades", "aposta", "apostas",
+        "odd", "odds", "entrada", "entradas", "sugestão", "sugestao",
+        "múltipla", "multipla", "value", "ev", "+ev",
+        "stake", "banca", "quanto apostar",
+        "me mande", "me mostre", "quais são", "qual é", "quais", "qual",
+        "tem algum", "tem alguma", "existe", "há"
     ]
-    return any(k in m for k in keywords)
+    
+    return any(k in m for k in opportunity_keywords)
 
 
-def _build_context(bankroll: float = 100.0) -> Dict[str, Any]:
-    """
-    Monta um contexto rápido (phase + stats + oportunidades + múltiplas),
-    pra o LLM responder com base em dados reais do sistema.
-    """
+def _build_context(bankroll: float) -> Dict:
+    """Constrói contexto inteligente para o LLM"""
     agent = BettingAgent(bankroll)
-
-    # Phase
-    phase_info = agent.bankroll_manager.get_phase_info()
-
-    # Stats (usa bet_history)
-    stats = agent.get_statistics()
-
-    # Opportunities (usa APIs/cache)
     opportunities = agent.analyze_today_opportunities()
-    multiples = agent.detect_multiples(opportunities)
-
-    # Enxuga pra não mandar payload gigante pro LLM
-    context = {
-        "bankroll": float(phase_info.get("bankroll", bankroll)),
-        "phase": phase_info.get("phase"),
-        "opportunities": (opportunities or [])[:5],
-        "multiples": (multiples or [])[:2],
-        "stats": stats or {},
+    phase_info = agent.bankroll_manager.get_phase_info()
+    
+    # Organiza oportunidades por jogo
+    games = {}
+    for opp in opportunities:
+        match_key = opp['match']
+        if match_key not in games:
+            games[match_key] = {
+                'match': opp['match'],
+                'competition': opp['competition'],
+                'date': opp['date'],
+                'opportunities': []
+            }
+        games[match_key]['opportunities'].append(opp)
+    
+    return {
+        'date': datetime.now().strftime('%d/%m/%Y'),
+        'total_opportunities': len(opportunities),
+        'total_games': len(games),
+        'opportunities': opportunities,
+        'games': list(games.values()),
+        'phase': phase_info['phase'],
+        'bankroll': phase_info['bankroll'],
+        'min_ev': phase_info['min_ev']
     }
-    return context
 
 
 # =========================
@@ -122,6 +130,9 @@ def get_opportunities(request: OpportunitiesRequest):
             "count": len(opportunities),
         }
     except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        print(f"\n❌ ERRO NO OPPORTUNITIES:\n{error_detail}\n")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -129,10 +140,13 @@ def get_opportunities(request: OpportunitiesRequest):
 def get_statistics():
     """Retorna estatísticas"""
     try:
-        agent = BettingAgent(100)  # placeholder
+        agent = BettingAgent(100)
         stats = agent.get_statistics()
         return stats
     except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        print(f"\n❌ ERRO NO STATISTICS:\n{error_detail}\n")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -145,8 +159,8 @@ def get_history(limit: int = 10):
         return history
     except Exception as e:
         import traceback
-        print("ERRO NO HISTORY:")
-        print(traceback.format_exc())
+        error_detail = traceback.format_exc()
+        print(f"\n❌ ERRO NO HISTORY:\n{error_detail}\n")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -154,32 +168,57 @@ def get_history(limit: int = 10):
 def get_phase():
     """Retorna informações da fase atual"""
     try:
-        agent = BettingAgent(100)  # placeholder
+        agent = BettingAgent(100)
         phase_info = agent.bankroll_manager.get_phase_info()
         return phase_info
     except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        print(f"\n❌ ERRO NO PHASE:\n{error_detail}\n")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/chat")
 def chat(request: ChatRequest):
-    """
-    Chat com LLM.
-    - Se o front/curl mandar context, usamos.
-    - Se NÃO mandar e a pergunta exigir dados, a API monta contexto automaticamente.
-    """
+    """Endpoint de chat inteligente"""
+    print(f"\n💬 Chat recebeu: {request.message}")
+    
+    needs_ctx = _needs_context(request.message)
+    
+    # Construi contexto apenas se necessário
+    context = None
+    if needs_ctx:
+        print(f"   🔍 Detectado pedido de oportunidades - construindo contexto...")
+        context = _build_context(bankroll=100.0)
+        print(f"   📊 Contexto: {context['total_opportunities']} oportunidades em {context['total_games']} jogos")
+        
+        # Formata contexto para o LLM
+        llm_context = {
+            'bankroll': context['bankroll'],
+            'phase': context['phase'],
+            'opportunities': context['opportunities'],
+            'stats': {}  # Pode adicionar stats se tiver
+        }
+    else:
+        llm_context = None
+    
+    # Chama LLM com contexto estruturado
     try:
-        llm = LLMService()
-
-        # Se não veio contexto e a pergunta sugere que precisa, monta contexto automaticamente
-        context = request.context
-        if context is None and _needs_context(request.message):
-            context = _build_context(bankroll=100.0)
-
-        response = llm.chat(request.message, context)
+        response = llm_service.chat(
+            user_message=request.message,
+            context=llm_context
+        )
+        
+        # ✅ CORRIGIDO: Retorna "message" ao invés de "response"
         return {"message": response}
+    
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"❌ Erro no chat: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "message": f"Desculpe, ocorreu um erro ao processar sua mensagem. Erro: {str(e)}"
+        }
 
 
 @app.post("/register-bet")
@@ -197,6 +236,9 @@ def register_bet(request: BetRequest):
         bet_id = agent.register_bet(bet_data)
         return {"bet_id": bet_id, "message": "Aposta registrada com sucesso"}
     except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        print(f"\n❌ ERRO NO REGISTER-BET:\n{error_detail}\n")
         raise HTTPException(status_code=500, detail=str(e))
 
 

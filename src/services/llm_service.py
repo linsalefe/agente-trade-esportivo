@@ -12,24 +12,34 @@ class LLMService:
         
         self.system_prompt = """Você é um assistente especializado em apostas esportivas e value betting.
 
+REGRA CRÍTICA - SEMPRE use os dados fornecidos no contexto:
+- Se o contexto contém oportunidades, MOSTRE-AS formatadas com detalhes
+- NUNCA diga "não tenho acesso" quando o contexto tem dados
+- Se perguntarem sobre jogos/oportunidades e há contexto, liste-os!
+
 Seu papel:
-- Ajudar usuários a entender oportunidades de apostas
+- Analisar e apresentar oportunidades de apostas com +EV
 - Explicar conceitos como EV (Expected Value), odds, probabilidades
-- Analisar múltiplas e apostas simples
-- Dar contexto sobre gestão de banca e controle de risco
-- Sempre ser objetivo e matemático, nunca prometer lucro garantido
+- Organizar informações de forma clara com emojis
+- Sempre ser objetivo e matemático
+
+FORMATO PARA OPORTUNIDADES:
+🎯 **[JOGO]**
+📊 Mercado: [Over/Under/BTTS/Handicap]
+💰 Odd: [valor] | +EV: [%] | Prob: [%]
+💵 Stake: R$ [valor] | Retorno: R$ [valor]
 
 Conceitos importantes:
-- EV (Expected Value): Lucro esperado no longo prazo. EV positivo = boa aposta matematicamente
-- Value Bet: Quando as odds do mercado são maiores que a probabilidade real (edge)
-- Kelly Criterion: Método matemático para calcular stake ótimo
-- Gestão de Banca: Sistema de fases com stakes que diminuem conforme banca cresce
-- Múltiplas: Combinação de apostas. Maior risco, maior retorno potencial
+- EV (Expected Value): Lucro esperado no longo prazo
+- Value Bet: Quando as odds são maiores que a probabilidade real
+- Kelly Criterion: Método para calcular stake ótimo
+- Gestão de Banca: Fases com stakes decrescentes
+- Múltiplas: Combinação de apostas independentes
 
 Fase 1-4: Alavancagem (stakes 15% → 4%)
 Consolidação: Acima R$ 50k (stakes 1.5%)
 
-Sempre seja direto, conciso e educativo. Nunca use emojis excessivamente."""
+Seja direto, conciso e use SEMPRE os dados do contexto quando disponíveis!"""
 
     def chat(self, user_message: str, context: Optional[Dict] = None) -> str:
         """Envia mensagem para o LLM com contexto opcional"""
@@ -72,10 +82,19 @@ Sempre seja direto, conciso e educativo. Nunca use emojis excessivamente."""
         if 'opportunities' in context and context['opportunities']:
             formatted.append(f"\nOportunidades encontradas: {len(context['opportunities'])}")
             
-            # Top 3 oportunidades
-            for i, opp in enumerate(context['opportunities'][:3], 1):
+            # Top 5 oportunidades com DATA
+            for i, opp in enumerate(context['opportunities'][:5], 1):
+                # Extrai data do jogo
+                date_str = opp.get('date', 'Data não disponível')
+                try:
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                    date_formatted = dt.strftime('%d/%m/%Y %H:%M')
+                except:
+                    date_formatted = date_str
+                
                 formatted.append(
-                    f"{i}. {opp['match']} - {opp['market']} @ {opp['odds']} "
+                    f"{i}. {opp['match']} ({date_formatted}) - {opp['market']} @ {opp['odds']} "
                     f"(EV: +{opp['ev']:.1f}%, Prob: {opp['probability']*100:.1f}%)"
                 )
         
@@ -84,7 +103,6 @@ Sempre seja direto, conciso e educativo. Nunca use emojis excessivamente."""
             formatted.append(f"\nMúltiplas detectadas: {len(context['multiples'])}")
             
             for i, mult in enumerate(context['multiples'][:2], 1):
-                # Usa as chaves corretas retornadas pelo MultipleDetector
                 legs = mult.get('legs', [])
                 formatted.append(
                     f"{i}. Odd combinada: {mult['combined_odds']:.2f}x "
