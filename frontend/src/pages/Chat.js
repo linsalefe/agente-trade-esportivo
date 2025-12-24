@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   Box,
   Container,
@@ -7,16 +7,33 @@ import {
   IconButton,
   Typography,
   Avatar,
-  CircularProgress,
   useTheme,
   useMediaQuery,
   Fade,
   Chip,
+  Stack,
+  Tooltip,
+  Divider,
+  Snackbar,
+  Button,
+  Grow,
+  Collapse,
+  LinearProgress,
 } from '@mui/material';
+
 import SendIcon from '@mui/icons-material/Send';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import PersonIcon from '@mui/icons-material/Person';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import WifiIcon from '@mui/icons-material/Wifi';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import ThumbUpAltOutlinedIcon from '@mui/icons-material/ThumbUpAltOutlined';
+import ThumbDownAltOutlinedIcon from '@mui/icons-material/ThumbDownAltOutlined';
+
 import { sendChatMessage } from '../services/api';
 
 const Chat = () => {
@@ -26,59 +43,131 @@ const Chat = () => {
       content: 'Olá! 👋 Sou seu assistente de value betting. Como posso ajudar você hoje?',
     },
   ]);
+
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+
+  const [errorMsg, setErrorMsg] = useState('');
+  const [snack, setSnack] = useState({ open: false, message: '' });
+
+  const [showScrollDown, setShowScrollDown] = useState(false);
+
   const messagesEndRef = useRef(null);
-  
+  const scrollAreaRef = useRef(null);
+  const lastUserInputRef = useRef('');
+
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  const quickQuestions = useMemo(
+    () => [
+      { label: '💡 O que é EV?', prompt: 'O que é EV e como interpretar?' },
+      { label: '📊 Quais os jogos de hoje?', prompt: 'Quais os jogos de hoje e onde há oportunidades?' },
+      { label: '🎯 Gestão de banca', prompt: 'Como funciona a gestão de banca e stake sugerido?' },
+      { label: '📈 Múltiplas valem a pena?', prompt: 'Vale a pena fazer múltiplas? Quando faz sentido?' },
+    ],
+    []
+  );
+
+  const formatTime = () =>
+    new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+  const status = useMemo(() => {
+    if (errorMsg) return { label: 'Problema de conexão', icon: <ErrorOutlineIcon fontSize="small" />, color: 'error' };
+    if (loading) return { label: 'Digitando…', icon: <AutoAwesomeIcon fontSize="small" />, color: 'primary' };
+    return { label: 'Online', icon: <WifiIcon fontSize="small" />, color: 'success' };
+  }, [loading, errorMsg]);
+
+  const scrollToBottom = useCallback((behavior = 'smooth') => {
+    messagesEndRef.current?.scrollIntoView({ behavior });
+  }, []);
+
+  const handleScroll = useCallback(() => {
+    const el = scrollAreaRef.current;
+    if (!el) return;
+
+    const distanceFromBottom = el.scrollHeight - (el.scrollTop + el.clientHeight);
+    setShowScrollDown(distanceFromBottom > 220);
+  }, []);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    // Auto-scroll somente quando o usuário está perto do fim
+    if (!showScrollDown) scrollToBottom('smooth');
+  }, [messages, loading, showScrollDown, scrollToBottom]);
 
-  const handleSend = async () => {
-    if (!input.trim() || loading) return;
+  useEffect(() => {
+    const el = scrollAreaRef.current;
+    if (!el) return;
 
-    const userMessage = { role: 'user', content: input };
-    setMessages((prev) => [...prev, userMessage]);
+    handleScroll();
+    el.addEventListener('scroll', handleScroll);
+    return () => el.removeEventListener('scroll', handleScroll);
+  }, [handleScroll]);
+
+  const safeCopy = async (text) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setSnack({ open: true, message: 'Copiado ✅' });
+    } catch {
+      setSnack({ open: true, message: 'Não consegui copiar automaticamente.' });
+    }
+  };
+
+  const addMessage = (msg) => setMessages((prev) => [...prev, msg]);
+
+  const send = async (text) => {
+    const content = (text ?? input).trim();
+    if (!content || loading) return;
+
+    setErrorMsg('');
+    lastUserInputRef.current = content;
+
+    const userMessage = { role: 'user', content };
+    addMessage(userMessage);
+
     setInput('');
     setLoading(true);
 
     try {
-      // ✅ CORRIGIDO: Não envia context, deixa o backend construir automaticamente
-      const response = await sendChatMessage(input);
-      const assistantMessage = { role: 'assistant', content: response.message };
-      setMessages((prev) => [...prev, assistantMessage]);
+      const response = await sendChatMessage(content);
+      const assistantMessage = { role: 'assistant', content: response?.message || 'Sem resposta no momento.' };
+      addMessage(assistantMessage);
     } catch (error) {
       console.error('Erro no chat:', error);
-      const errorMessage = {
+      setErrorMsg('Falha ao enviar. Tente novamente.');
+      addMessage({
         role: 'assistant',
-        content: 'Desculpe, ocorreu um erro. Tente novamente. 😔',
-      };
-      setMessages((prev) => [...prev, errorMessage]);
+        content: 'Desculpe, ocorreu um erro ao enviar. 😔 Você pode tentar novamente.',
+      });
     } finally {
       setLoading(false);
     }
   };
 
-  const handleKeyPress = (e) => {
+  const handleSend = () => send(input);
+
+  const handleRetry = () => {
+    if (!lastUserInputRef.current) return;
+    send(lastUserInputRef.current);
+  };
+
+  const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
   };
 
-  const quickQuestions = [
-    '💡 O que é EV?',
-    '📊 Quais os jogos de hoje?',
-    '🎯 Como funciona a gestão de banca?',
-    '📈 Vale a pena fazer múltiplas?',
-  ];
+  const handleClear = () => {
+    setMessages([
+      { role: 'assistant', content: 'Chat limpo ✅ Como posso te ajudar agora?' },
+    ]);
+    setErrorMsg('');
+    setSnack({ open: true, message: 'Chat limpo.' });
+    setTimeout(() => scrollToBottom('auto'), 50);
+  };
+
+  const isFirstScreen = messages.length === 1;
 
   return (
     <Box
@@ -101,47 +190,105 @@ const Chat = () => {
         {/* Header */}
         <Fade in timeout={600}>
           <Box sx={{ mb: 2 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-              <AutoAwesomeIcon
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <AutoAwesomeIcon sx={{ color: 'primary.main', fontSize: isMobile ? 28 : 32 }} />
+                <Box>
+                  <Typography
+                    variant={isMobile ? 'h5' : 'h4'}
+                    sx={{
+                      fontWeight: 900,
+                      background: 'linear-gradient(135deg, #00A859 0%, #00763E 100%)',
+                      WebkitBackgroundClip: 'text',
+                      WebkitTextFillColor: 'transparent',
+                      lineHeight: 1.05,
+                    }}
+                  >
+                    Chat com Agente
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.4 }}>
+                    Tire suas dúvidas sobre value betting • {formatTime()}
+                  </Typography>
+                </Box>
+              </Box>
+
+              {/* Status + ações */}
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Chip
+                  icon={status.icon}
+                  label={status.label}
+                  color={status.color}
+                  variant={status.color === 'success' ? 'outlined' : 'filled'}
+                  sx={{ fontWeight: 800 }}
+                />
+
+                <Tooltip title="Limpar chat">
+                  <IconButton
+                    onClick={handleClear}
+                    sx={{
+                      border: '1px solid rgba(0,0,0,0.08)',
+                      borderRadius: 2,
+                      bgcolor: 'white',
+                    }}
+                    aria-label="limpar chat"
+                  >
+                    <DeleteOutlineIcon />
+                  </IconButton>
+                </Tooltip>
+
+                <Tooltip title="Ir para o final">
+                  <IconButton
+                    onClick={() => scrollToBottom('smooth')}
+                    sx={{
+                      border: '1px solid rgba(0,0,0,0.08)',
+                      borderRadius: 2,
+                      bgcolor: 'white',
+                    }}
+                    aria-label="ir para o final"
+                  >
+                    <ArrowDownwardIcon />
+                  </IconButton>
+                </Tooltip>
+              </Stack>
+            </Box>
+
+            {/* Dica de uso */}
+            <Collapse in={!loading && isFirstScreen}>
+              <Paper
+                elevation={0}
                 sx={{
-                  color: 'primary.main',
-                  fontSize: isMobile ? 28 : 32,
-                }}
-              />
-              <Typography
-                variant={isMobile ? 'h5' : 'h4'}
-                sx={{
-                  fontWeight: 800,
-                  background: 'linear-gradient(135deg, #00A859 0%, #00763E 100%)',
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent',
+                  mt: 2,
+                  p: 1.5,
+                  borderRadius: 3,
+                  border: '1px solid rgba(0,0,0,0.08)',
+                  bgcolor: 'rgba(0,0,0,0.02)',
                 }}
               >
-                Chat com Agente
-              </Typography>
-            </Box>
-            <Typography variant="body2" color="text.secondary">
-              Tire suas dúvidas sobre value betting
-            </Typography>
+                <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                  Dica: pressione <b>Enter</b> para enviar e <b>Shift + Enter</b> para quebrar linha.
+                </Typography>
+              </Paper>
+            </Collapse>
           </Box>
         </Fade>
 
-        {/* Quick Questions */}
-        {messages.length === 1 && (
+        {/* Quick Questions (melhorado: envia com 1 clique) */}
+        {isFirstScreen && (
           <Fade in timeout={800}>
             <Box sx={{ mb: 2 }}>
-              <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
-                Perguntas rápidas:
+              <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block', fontWeight: 800 }}>
+                Sugestões rápidas:
               </Typography>
+
               <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                {quickQuestions.map((question, index) => (
+                {quickQuestions.map((q, index) => (
                   <Chip
                     key={index}
-                    label={question}
-                    onClick={() => setInput(question.substring(2))}
+                    label={q.label}
+                    onClick={() => send(q.prompt)}
                     sx={{
                       cursor: 'pointer',
-                      fontWeight: 500,
+                      fontWeight: 700,
                       '&:hover': {
                         bgcolor: 'primary.main',
                         color: 'white',
@@ -165,127 +312,180 @@ const Chat = () => {
             borderRadius: 3,
             border: '1px solid rgba(0,0,0,0.05)',
             background: 'white',
+            position: 'relative',
           }}
         >
+          {/* mini loading bar no topo */}
+          <Collapse in={loading}>
+            <LinearProgress />
+          </Collapse>
+
           {/* Messages Area */}
           <Box
+            ref={scrollAreaRef}
             sx={{
               flex: 1,
               overflowY: 'auto',
               p: { xs: 2, md: 3 },
               background: 'linear-gradient(180deg, #FAFBFC 0%, #FFFFFF 100%)',
-              '&::-webkit-scrollbar': {
-                width: '8px',
-              },
-              '&::-webkit-scrollbar-track': {
-                background: 'transparent',
-              },
-              '&::-webkit-scrollbar-thumb': {
-                background: '#D1D5DB',
-                borderRadius: '4px',
-              },
+              '&::-webkit-scrollbar': { width: '8px' },
+              '&::-webkit-scrollbar-track': { background: 'transparent' },
+              '&::-webkit-scrollbar-thumb': { background: '#D1D5DB', borderRadius: '4px' },
             }}
           >
-            {messages.map((msg, index) => (
-              <Fade in key={index} timeout={400}>
-                <Box
-                  sx={{
-                    display: 'flex',
-                    mb: 3,
-                    justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                    animation: 'slideIn 0.3s ease',
-                    '@keyframes slideIn': {
-                      from: {
-                        opacity: 0,
-                        transform: 'translateY(10px)',
-                      },
-                      to: {
-                        opacity: 1,
-                        transform: 'translateY(0)',
-                      },
-                    },
-                  }}
-                >
-                  {msg.role === 'assistant' && (
-                    <Avatar
-                      sx={{
-                        bgcolor: 'primary.main',
-                        mr: 1.5,
-                        width: isMobile ? 36 : 40,
-                        height: isMobile ? 36 : 40,
-                        boxShadow: '0 4px 12px rgba(0,168,89,0.3)',
-                      }}
-                    >
-                      <SmartToyIcon fontSize="small" />
-                    </Avatar>
-                  )}
+            {/* Separador sutil */}
+            <Stack alignItems="center" sx={{ mb: 2 }}>
+              <Chip
+                label="Hoje"
+                size="small"
+                sx={{
+                  bgcolor: 'rgba(0,0,0,0.06)',
+                  fontWeight: 800,
+                }}
+              />
+            </Stack>
 
-                  <Paper
-                    elevation={0}
+            {messages.map((msg, index) => {
+              const isUser = msg.role === 'user';
+              const isAssistant = msg.role === 'assistant';
+
+              return (
+                <Grow in key={index} timeout={260}>
+                  <Box
                     sx={{
-                      p: { xs: 1.5, md: 2 },
-                      maxWidth: { xs: '75%', md: '70%' },
-                      background:
-                        msg.role === 'user'
-                          ? 'linear-gradient(135deg, #00A859 0%, #00C46A 100%)'
-                          : 'white',
-                      color: msg.role === 'user' ? 'white' : 'text.primary',
-                      borderRadius: 3,
-                      border: msg.role === 'assistant' ? '1px solid rgba(0,0,0,0.08)' : 'none',
-                      boxShadow:
-                        msg.role === 'user'
-                          ? '0 4px 12px rgba(0,168,89,0.3)'
-                          : '0 2px 8px rgba(0,0,0,0.08)',
+                      display: 'flex',
+                      mb: 2.5,
+                      justifyContent: isUser ? 'flex-end' : 'flex-start',
+                      gap: 1.5,
                     }}
                   >
-                    <Typography
-                      variant="body1"
-                      sx={{
-                        whiteSpace: 'pre-wrap',
-                        lineHeight: 1.6,
-                        fontSize: isMobile ? '0.9rem' : '1rem',
-                      }}
-                    >
-                      {msg.content}
-                    </Typography>
-                  </Paper>
+                    {isAssistant && (
+                      <Avatar
+                        sx={{
+                          bgcolor: 'primary.main',
+                          width: isMobile ? 36 : 40,
+                          height: isMobile ? 36 : 40,
+                          boxShadow: '0 4px 12px rgba(0,168,89,0.3)',
+                        }}
+                      >
+                        <SmartToyIcon fontSize="small" />
+                      </Avatar>
+                    )}
 
-                  {msg.role === 'user' && (
-                    <Avatar
-                      sx={{
-                        bgcolor: 'secondary.main',
-                        ml: 1.5,
-                        width: isMobile ? 36 : 40,
-                        height: isMobile ? 36 : 40,
-                        boxShadow: '0 4px 12px rgba(33,33,33,0.3)',
-                      }}
-                    >
-                      <PersonIcon fontSize="small" />
-                    </Avatar>
-                  )}
-                </Box>
-              </Fade>
-            ))}
+                    <Box sx={{ maxWidth: { xs: '82%', md: '72%' } }}>
+                      <Paper
+                        elevation={0}
+                        sx={{
+                          p: { xs: 1.5, md: 2 },
+                          background: isUser
+                            ? 'linear-gradient(135deg, #00A859 0%, #00C46A 100%)'
+                            : 'white',
+                          color: isUser ? 'white' : 'text.primary',
+                          borderRadius: 3,
+                          border: isAssistant ? '1px solid rgba(0,0,0,0.08)' : 'none',
+                          boxShadow: isUser
+                            ? '0 4px 12px rgba(0,168,89,0.3)'
+                            : '0 2px 8px rgba(0,0,0,0.08)',
+                          position: 'relative',
+                        }}
+                      >
+                        <Typography
+                          variant="body1"
+                          sx={{
+                            whiteSpace: 'pre-wrap',
+                            lineHeight: 1.65,
+                            fontSize: isMobile ? '0.92rem' : '1rem',
+                          }}
+                        >
+                          {msg.content}
+                        </Typography>
 
+                        {/* Ações na mensagem do assistente */}
+                        {isAssistant && (
+                          <Box
+                            sx={{
+                              mt: 1.3,
+                              pt: 1,
+                              borderTop: '1px solid rgba(0,0,0,0.06)',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              gap: 1,
+                            }}
+                          >
+                            <Stack direction="row" spacing={0.5} alignItems="center">
+                              <Tooltip title="Copiar">
+                                <IconButton size="small" onClick={() => safeCopy(msg.content)}>
+                                  <ContentCopyIcon fontSize="inherit" />
+                                </IconButton>
+                              </Tooltip>
+                              <Tooltip title="Gostei">
+                                <IconButton
+                                  size="small"
+                                  onClick={() => setSnack({ open: true, message: 'Feedback enviado 👍' })}
+                                >
+                                  <ThumbUpAltOutlinedIcon fontSize="inherit" />
+                                </IconButton>
+                              </Tooltip>
+                              <Tooltip title="Não gostei">
+                                <IconButton
+                                  size="small"
+                                  onClick={() => setSnack({ open: true, message: 'Feedback enviado 👎' })}
+                                >
+                                  <ThumbDownAltOutlinedIcon fontSize="inherit" />
+                                </IconButton>
+                              </Tooltip>
+                            </Stack>
+
+                            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
+                              {formatTime()}
+                            </Typography>
+                          </Box>
+                        )}
+                      </Paper>
+                    </Box>
+
+                    {isUser && (
+                      <Avatar
+                        sx={{
+                          bgcolor: 'secondary.main',
+                          width: isMobile ? 36 : 40,
+                          height: isMobile ? 36 : 40,
+                          boxShadow: '0 4px 12px rgba(33,33,33,0.3)',
+                        }}
+                      >
+                        <PersonIcon fontSize="small" />
+                      </Avatar>
+                    )}
+                  </Box>
+                </Grow>
+              );
+            })}
+
+            {/* Loading "digitando" */}
             {loading && (
               <Fade in>
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2.5, gap: 1.5 }}>
                   <Avatar
                     sx={{
                       bgcolor: 'primary.main',
-                      mr: 1.5,
                       width: isMobile ? 36 : 40,
                       height: isMobile ? 36 : 40,
                     }}
                   >
                     <SmartToyIcon fontSize="small" />
                   </Avatar>
+
                   <Paper
                     elevation={0}
                     sx={{
                       p: 2,
                       borderRadius: 3,
                       border: '1px solid rgba(0,0,0,0.08)',
+                      bgcolor: 'white',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 1.5,
                     }}
                   >
                     <Box sx={{ display: 'flex', gap: 0.5 }}>
@@ -300,13 +500,16 @@ const Chat = () => {
                             animation: 'pulse 1.4s infinite',
                             animationDelay: `${delay}s`,
                             '@keyframes pulse': {
-                              '0%, 80%, 100%': { opacity: 0.4 },
+                              '0%, 80%, 100%': { opacity: 0.35 },
                               '40%': { opacity: 1 },
                             },
                           }}
                         />
                       ))}
                     </Box>
+                    <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 700 }}>
+                      Digitando…
+                    </Typography>
                   </Paper>
                 </Box>
               </Fade>
@@ -314,6 +517,32 @@ const Chat = () => {
 
             <div ref={messagesEndRef} />
           </Box>
+
+          {/* Scroll down floating button */}
+          <Fade in={showScrollDown}>
+            <Box
+              sx={{
+                position: 'absolute',
+                right: 16,
+                bottom: 92,
+                zIndex: 5,
+              }}
+            >
+              <Tooltip title="Descer para a última mensagem">
+                <IconButton
+                  onClick={() => scrollToBottom('smooth')}
+                  sx={{
+                    bgcolor: 'white',
+                    border: '1px solid rgba(0,0,0,0.08)',
+                    boxShadow: '0 10px 24px rgba(0,0,0,0.12)',
+                    '&:hover': { bgcolor: 'grey.50' },
+                  }}
+                >
+                  <ArrowDownwardIcon />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          </Fade>
 
           {/* Input Area */}
           <Box
@@ -323,30 +552,67 @@ const Chat = () => {
               borderTop: '1px solid rgba(0,0,0,0.08)',
             }}
           >
+            {/* Error bar + retry */}
+            <Collapse in={!!errorMsg}>
+              <Paper
+                elevation={0}
+                sx={{
+                  mb: 1.5,
+                  p: 1.2,
+                  borderRadius: 2.5,
+                  border: '1px solid rgba(0,0,0,0.08)',
+                  bgcolor: 'rgba(255,0,0,0.04)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 1,
+                }}
+              >
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <ErrorOutlineIcon color="error" fontSize="small" />
+                  <Typography variant="body2" sx={{ fontWeight: 800 }}>
+                    {errorMsg}
+                  </Typography>
+                </Stack>
+
+                <Button
+                  size="small"
+                  variant="contained"
+                  onClick={handleRetry}
+                  startIcon={<RefreshIcon />}
+                  sx={{ fontWeight: 900, borderRadius: 2 }}
+                >
+                  Reenviar
+                </Button>
+              </Paper>
+            </Collapse>
+
             <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-end' }}>
               <TextField
                 fullWidth
                 variant="outlined"
-                placeholder="Digite sua mensagem..."
+                placeholder="Digite sua mensagem…"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                onKeyPress={handleKeyPress}
+                onKeyDown={handleKeyDown}
                 disabled={loading}
                 multiline
-                maxRows={4}
+                maxRows={5}
+                helperText="Enter envia • Shift+Enter quebra linha"
                 sx={{
                   '& .MuiOutlinedInput-root': {
                     borderRadius: 3,
                     bgcolor: 'grey.50',
-                    '&:hover': {
-                      bgcolor: 'grey.100',
-                    },
-                    '&.Mui-focused': {
-                      bgcolor: 'white',
-                    },
+                    '&:hover': { bgcolor: 'grey.100' },
+                    '&.Mui-focused': { bgcolor: 'white' },
+                  },
+                  '& .MuiFormHelperText-root': {
+                    marginLeft: 0.5,
+                    fontWeight: 700,
                   },
                 }}
               />
+
               <IconButton
                 onClick={handleSend}
                 disabled={!input.trim() || loading}
@@ -365,13 +631,22 @@ const Chat = () => {
                     color: 'grey.500',
                   },
                   transition: 'all 0.2s ease',
+                  borderRadius: 3,
                 }}
+                aria-label="enviar"
               >
                 <SendIcon />
               </IconButton>
             </Box>
           </Box>
         </Paper>
+
+        <Snackbar
+          open={snack.open}
+          autoHideDuration={2200}
+          onClose={() => setSnack((s) => ({ ...s, open: false }))}
+          message={snack.message}
+        />
       </Container>
     </Box>
   );
