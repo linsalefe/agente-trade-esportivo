@@ -14,11 +14,10 @@ import {
   Chip,
   Stack,
   Tooltip,
-  Divider,
+  Collapse,
   Snackbar,
   Button,
   Grow,
-  Collapse,
   LinearProgress,
 } from '@mui/material';
 
@@ -34,6 +33,11 @@ import WifiIcon from '@mui/icons-material/Wifi';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import ThumbUpAltOutlinedIcon from '@mui/icons-material/ThumbUpAltOutlined';
 import ThumbDownAltOutlinedIcon from '@mui/icons-material/ThumbDownAltOutlined';
+import SportsIcon from '@mui/icons-material/Sports';
+import SportsFootballIcon from '@mui/icons-material/SportsFootball';
+import SportsTennisIcon from '@mui/icons-material/SportsTennis';
+import TrendingUpIcon from '@mui/icons-material/TrendingUp';
+import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 
 import { sendChatMessage } from '../services/api';
 
@@ -62,10 +66,42 @@ const Chat = () => {
 
   const quickQuestions = useMemo(
     () => [
-      { label: '💡 O que é EV?', prompt: 'O que é EV e como interpretar?' },
-      { label: '📊 Quais os jogos de hoje?', prompt: 'Quais os jogos de hoje e onde há oportunidades?' },
-      { label: '🎯 Gestão de banca', prompt: 'Como funciona a gestão de banca e stake sugerido?' },
-      { label: '📈 Múltiplas valem a pena?', prompt: 'Vale a pena fazer múltiplas? Quando faz sentido?' },
+      { 
+        icon: <TrendingUpIcon fontSize="small" />, 
+        label: '💡 O que é EV?', 
+        prompt: 'O que é EV e como interpretar?',
+        color: '#00A859' 
+      },
+      { 
+        icon: <SportsIcon fontSize="small" />, 
+        label: '⚽ Jogos de futebol hoje?', 
+        prompt: 'Quais os jogos de futebol hoje e onde há oportunidades?',
+        color: '#00A859'
+      },
+      { 
+        icon: <SportsFootballIcon fontSize="small" />, 
+        label: '🏈 Jogos de NFL hoje?', 
+        prompt: 'Quais são os jogos de NFL disponíveis hoje?',
+        color: '#ED6C02'
+      },
+      { 
+        icon: <SportsTennisIcon fontSize="small" />, 
+        label: '🎾 Partidas de tênis ao vivo?', 
+        prompt: 'Quais partidas de tênis estão acontecendo agora?',
+        color: '#9C27B0'
+      },
+      { 
+        icon: <AttachMoneyIcon fontSize="small" />, 
+        label: '💰 Gestão de banca', 
+        prompt: 'Como funciona a gestão de banca e stake sugerido?',
+        color: '#00A859'
+      },
+      { 
+        icon: <TrendingUpIcon fontSize="small" />, 
+        label: '📈 Múltiplas valem a pena?', 
+        prompt: 'Vale a pena fazer múltiplas? Quando faz sentido?',
+        color: '#00A859'
+      },
     ],
     []
   );
@@ -278,14 +314,21 @@ const Chat = () => {
                 {quickQuestions.map((q, index) => (
                   <Chip
                     key={index}
+                    icon={q.icon}
                     label={q.label}
                     onClick={() => send(q.prompt)}
                     sx={{
                       cursor: 'pointer',
                       fontWeight: 700,
+                      transition: 'all 0.2s ease',
                       '&:hover': {
-                        bgcolor: 'primary.main',
+                        bgcolor: q.color,
                         color: 'white',
+                        transform: 'translateY(-2px)',
+                        boxShadow: 2,
+                        '& .MuiChip-icon': {
+                          color: 'white',
+                        },
                       },
                     }}
                   />
@@ -379,7 +422,6 @@ const Chat = () => {
                           position: 'relative',
                         }}
                       >
-                        {/* MARKDOWN AQUI! */}
                         {isAssistant ? (
                           <ReactMarkdown
                             components={{

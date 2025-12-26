@@ -32,6 +32,8 @@ import {
 } from '@mui/material';
 
 import SportsIcon from '@mui/icons-material/Sports';
+import SportsFootballIcon from '@mui/icons-material/SportsFootball';
+import SportsTennisIcon from '@mui/icons-material/SportsTennis';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SearchIcon from '@mui/icons-material/Search';
@@ -53,6 +55,7 @@ const Opportunities = () => {
 
   const [errorMsg, setErrorMsg] = useState('');
   const [activeTab, setActiveTab] = useState('simples');
+  const [sportTab, setSportTab] = useState('all'); // all, football, nfl, tennis
 
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState('ev_desc');
@@ -138,15 +141,40 @@ const Opportunities = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  // Filtra por esporte
+  const filterBySport = (opps) => {
+    if (sportTab === 'all') return opps;
+    
+    return opps.filter(opp => {
+      const sport = (opp?.sport || 'Football').toLowerCase();
+      
+      if (sportTab === 'football') {
+        return sport === 'football' || sport === 'soccer';
+      }
+      if (sportTab === 'nfl') {
+        return sport === 'nfl';
+      }
+      if (sportTab === 'tennis') {
+        return sport === 'tennis';
+      }
+      return true;
+    });
+  };
+
   const filteredOpps = useMemo(() => {
     const q = search.trim().toLowerCase();
 
-    const base = opportunities.filter((o) => {
+    // Primeiro filtra por esporte
+    const bySport = filterBySport(opportunities);
+
+    // Depois filtra por busca
+    const base = bySport.filter((o) => {
       if (!q) return true;
       const hay = `${o?.match || ''} ${o?.competition || ''} ${o?.market || ''}`.toLowerCase();
       return hay.includes(q);
     });
 
+    // Ordena
     const sorted = [...base].sort((a, b) => {
       const evA = safeNumber(a?.ev, 0);
       const evB = safeNumber(b?.ev, 0);
@@ -172,7 +200,25 @@ const Opportunities = () => {
     });
 
     return sorted;
-  }, [opportunities, search, sortBy]);
+  }, [opportunities, search, sortBy, sportTab]);
+
+  // Contadores por esporte
+  const sportCounts = useMemo(() => {
+    const football = opportunities.filter(o => {
+      const s = (o?.sport || 'Football').toLowerCase();
+      return s === 'football' || s === 'soccer';
+    }).length;
+    
+    const nfl = opportunities.filter(o => 
+      (o?.sport || '').toLowerCase() === 'nfl'
+    ).length;
+    
+    const tennis = opportunities.filter(o => 
+      (o?.sport || '').toLowerCase() === 'tennis'
+    ).length;
+
+    return { football, nfl, tennis, all: opportunities.length };
+  }, [opportunities]);
 
   const summary = useMemo(() => {
     const list = filteredOpps;
@@ -333,7 +379,7 @@ const Opportunities = () => {
           </Box>
         </Fade>
 
-        {/* Tabs */}
+        {/* Tabs: Simples vs Múltiplas */}
         <Paper
           elevation={0}
           sx={{
@@ -355,6 +401,56 @@ const Opportunities = () => {
             <Tab value="multiples" label={`Múltiplas (${multiples.length})`} />
           </Tabs>
         </Paper>
+
+        {/* Tabs de ESPORTE (apenas para simples) */}
+        {activeTab === 'simples' && (
+          <Fade in timeout={500}>
+            <Paper
+              elevation={0}
+              sx={{
+                borderRadius: 3,
+                border: '1px solid rgba(0,0,0,0.08)',
+                overflow: 'hidden',
+                mb: 2,
+              }}
+            >
+              <Tabs
+                value={sportTab}
+                onChange={(_, v) => setSportTab(v)}
+                variant="fullWidth"
+                sx={{
+                  '& .MuiTab-root': { fontWeight: 800 },
+                  bgcolor: 'rgba(0,168,89,0.04)',
+                }}
+              >
+                <Tab 
+                  value="all" 
+                  icon={<SportsIcon />} 
+                  iconPosition="start"
+                  label={`Todos (${sportCounts.all})`} 
+                />
+                <Tab 
+                  value="football" 
+                  icon={<SportsIcon />} 
+                  iconPosition="start"
+                  label={`Futebol (${sportCounts.football})`} 
+                />
+                <Tab 
+                  value="nfl" 
+                  icon={<SportsFootballIcon />} 
+                  iconPosition="start"
+                  label={`NFL (${sportCounts.nfl})`} 
+                />
+                <Tab 
+                  value="tennis" 
+                  icon={<SportsTennisIcon />} 
+                  iconPosition="start"
+                  label={`Tênis (${sportCounts.tennis})`} 
+                />
+              </Tabs>
+            </Paper>
+          </Fade>
+        )}
 
         {/* Controles (busca + ordenação) */}
         {activeTab === 'simples' && (
@@ -453,11 +549,15 @@ const Opportunities = () => {
                   }
                 >
                   <Typography variant="h6" sx={{ mb: 1, fontWeight: 800 }}>
-                    Nenhuma oportunidade com bom +EV hoje
+                    Nenhuma oportunidade com bom +EV 
+                    {sportTab !== 'all' && ` em ${
+                      sportTab === 'football' ? 'Futebol' :
+                      sportTab === 'nfl' ? 'NFL' : 'Tênis'
+                    }`}
                   </Typography>
                   <Typography variant="body2">
                     Isso é normal — e faz parte da disciplina do método. Em dias com poucos jogos (ex.: véspera de feriado),
-                    o melhor “trade” pode ser não entrar em nenhum.
+                    o melhor "trade" pode ser não entrar em nenhum.
                   </Typography>
                 </Alert>
               </Fade>
@@ -573,6 +673,7 @@ const Opportunities = () => {
                     const stake = safeNumber(opp?.stake, 0);
                     const potentialReturn = safeNumber(opp?.potential_return, 0);
                     const isExpanded = expandedIndex === index;
+                    const sport = opp?.sport || 'Football';
 
                     return (
                       <Grid item xs={12} md={6} key={`${opp?.match || 'opp'}-${index}`}>
@@ -637,10 +738,27 @@ const Opportunities = () => {
                                       fontWeight: 800,
                                     }}
                                   />
+                                  <Chip
+                                    label={sport}
+                                    size="small"
+                                    icon={
+                                      sport === 'NFL' ? <SportsFootballIcon /> :
+                                      sport === 'Tennis' ? <SportsTennisIcon /> :
+                                      <SportsIcon />
+                                    }
+                                    sx={{
+                                      bgcolor: 
+                                        sport === 'NFL' ? 'rgba(237, 108, 2, 0.1)' :
+                                        sport === 'Tennis' ? 'rgba(156, 39, 176, 0.1)' :
+                                        'rgba(0, 168, 89, 0.1)',
+                                      fontWeight: 700,
+                                      fontSize: '0.7rem',
+                                    }}
+                                  />
                                 </Stack>
                               </Box>
 
-                              {/* Linha de “scan” rápida */}
+                              {/* Linha de "scan" rápida */}
                               <Grid container spacing={2} sx={{ mb: 1.5 }}>
                                 <Grid item xs={4}>
                                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
@@ -736,7 +854,7 @@ const Opportunities = () => {
                                 </Button>
                               </Stack>
 
-                              {/* Detalhes expansíveis (sem quebrar nada) */}
+                              {/* Detalhes expansíveis */}
                               <Collapse in={isExpanded}>
                                 <Divider sx={{ my: 2 }} />
 
@@ -752,7 +870,7 @@ const Opportunities = () => {
 
                                   <Grid item xs={6}>
                                     <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                                      “Edge” (Prob - Impl.)
+                                      "Edge" (Prob - Impl.)
                                     </Typography>
                                     <Typography variant="body2" fontWeight={900}>
                                       {odds > 0 ? `${(((prob - 1 / odds) * 100) || 0).toFixed(1)}%` : '-'}
@@ -773,7 +891,7 @@ const Opportunities = () => {
                                         Dica rápida
                                       </Typography>
                                       <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                                        Se você for entrar, priorize as maiores EV com boa probabilidade — e evite “forçar”
+                                        Se você for entrar, priorize as maiores EV com boa probabilidade — e evite "forçar"
                                         entrada só pra ter ação.
                                       </Typography>
                                     </Paper>
@@ -810,7 +928,7 @@ const Opportunities = () => {
                     Sem múltiplas estratégicas hoje
                   </Typography>
                   <Typography variant="body2">
-                    Quando aparecer, use como opção extra — mas trate múltipla como “perfil de risco” mais alto.
+                    Quando aparecer, use como opção extra — mas trate múltipla como "perfil de risco" mais alto.
                   </Typography>
                 </Alert>
               ) : (
