@@ -27,7 +27,7 @@ function Navigation() {
               textDecoration: 'none',
             }}
           >
-            🎯 Value Betting Agent
+            🎯 BetIQ
           </Typography>
 
           <Tabs

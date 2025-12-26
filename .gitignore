@@ -48,3 +48,9 @@ Thumbs.db
 
 # Ambiente
 ENVIRONMENT=development
+# Environment variables
+.env
+.env.production
+.env.local
+
+# Data files

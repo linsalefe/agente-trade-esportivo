@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import ReactMarkdown from 'react-markdown';
 import {
   Box,
   Container,
@@ -91,7 +92,6 @@ const Chat = () => {
   }, []);
 
   useEffect(() => {
-    // Auto-scroll somente quando o usuário está perto do fim
     if (!showScrollDown) scrollToBottom('smooth');
   }, [messages, loading, showScrollDown, scrollToBottom]);
 
@@ -187,7 +187,6 @@ const Chat = () => {
           py: { xs: 2, md: 3 },
         }}
       >
-        {/* Header */}
         <Fade in timeout={600}>
           <Box sx={{ mb: 2 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
@@ -212,7 +211,6 @@ const Chat = () => {
                 </Box>
               </Box>
 
-              {/* Status + ações */}
               <Stack direction="row" spacing={1} alignItems="center">
                 <Chip
                   icon={status.icon}
@@ -230,7 +228,6 @@ const Chat = () => {
                       borderRadius: 2,
                       bgcolor: 'white',
                     }}
-                    aria-label="limpar chat"
                   >
                     <DeleteOutlineIcon />
                   </IconButton>
@@ -244,7 +241,6 @@ const Chat = () => {
                       borderRadius: 2,
                       bgcolor: 'white',
                     }}
-                    aria-label="ir para o final"
                   >
                     <ArrowDownwardIcon />
                   </IconButton>
@@ -252,7 +248,6 @@ const Chat = () => {
               </Stack>
             </Box>
 
-            {/* Dica de uso */}
             <Collapse in={!loading && isFirstScreen}>
               <Paper
                 elevation={0}
@@ -272,7 +267,6 @@ const Chat = () => {
           </Box>
         </Fade>
 
-        {/* Quick Questions (melhorado: envia com 1 clique) */}
         {isFirstScreen && (
           <Fade in timeout={800}>
             <Box sx={{ mb: 2 }}>
@@ -301,7 +295,6 @@ const Chat = () => {
           </Fade>
         )}
 
-        {/* Chat Container */}
         <Paper
           elevation={0}
           sx={{
@@ -315,12 +308,10 @@ const Chat = () => {
             position: 'relative',
           }}
         >
-          {/* mini loading bar no topo */}
           <Collapse in={loading}>
             <LinearProgress />
           </Collapse>
 
-          {/* Messages Area */}
           <Box
             ref={scrollAreaRef}
             sx={{
@@ -333,7 +324,6 @@ const Chat = () => {
               '&::-webkit-scrollbar-thumb': { background: '#D1D5DB', borderRadius: '4px' },
             }}
           >
-            {/* Separador sutil */}
             <Stack alignItems="center" sx={{ mb: 2 }}>
               <Chip
                 label="Hoje"
@@ -389,18 +379,40 @@ const Chat = () => {
                           position: 'relative',
                         }}
                       >
-                        <Typography
-                          variant="body1"
-                          sx={{
-                            whiteSpace: 'pre-wrap',
-                            lineHeight: 1.65,
-                            fontSize: isMobile ? '0.92rem' : '1rem',
-                          }}
-                        >
-                          {msg.content}
-                        </Typography>
+                        {/* MARKDOWN AQUI! */}
+                        {isAssistant ? (
+                          <ReactMarkdown
+                            components={{
+                              p: ({node, ...props}) => <Typography variant="body1" sx={{ mb: 1, lineHeight: 1.65 }} {...props} />,
+                              h3: ({node, ...props}) => <Typography variant="h6" sx={{ fontWeight: 700, mt: 1.5, mb: 1 }} {...props} />,
+                              li: ({node, ...props}) => <li style={{ marginLeft: '1.2rem', marginBottom: '0.4rem' }} {...props} />,
+                              code: ({node, inline, ...props}) => (
+                                <code style={{
+                                  backgroundColor: 'rgba(0,0,0,0.06)',
+                                  padding: inline ? '2px 6px' : '12px',
+                                  borderRadius: '4px',
+                                  display: inline ? 'inline' : 'block',
+                                  fontSize: '0.9em',
+                                  fontFamily: 'monospace'
+                                }} {...props} />
+                              ),
+                            }}
+                          >
+                            {msg.content}
+                          </ReactMarkdown>
+                        ) : (
+                          <Typography
+                            variant="body1"
+                            sx={{
+                              whiteSpace: 'pre-wrap',
+                              lineHeight: 1.65,
+                              fontSize: isMobile ? '0.92rem' : '1rem',
+                            }}
+                          >
+                            {msg.content}
+                          </Typography>
+                        )}
 
-                        {/* Ações na mensagem do assistente */}
                         {isAssistant && (
                           <Box
                             sx={{
@@ -462,7 +474,6 @@ const Chat = () => {
               );
             })}
 
-            {/* Loading "digitando" */}
             {loading && (
               <Fade in>
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 2.5, gap: 1.5 }}>
@@ -518,7 +529,6 @@ const Chat = () => {
             <div ref={messagesEndRef} />
           </Box>
 
-          {/* Scroll down floating button */}
           <Fade in={showScrollDown}>
             <Box
               sx={{
@@ -544,7 +554,6 @@ const Chat = () => {
             </Box>
           </Fade>
 
-          {/* Input Area */}
           <Box
             sx={{
               p: { xs: 2, md: 2.5 },
@@ -552,7 +561,6 @@ const Chat = () => {
               borderTop: '1px solid rgba(0,0,0,0.08)',
             }}
           >
-            {/* Error bar + retry */}
             <Collapse in={!!errorMsg}>
               <Paper
                 elevation={0}
@@ -633,7 +641,6 @@ const Chat = () => {
                   transition: 'all 0.2s ease',
                   borderRadius: 3,
                 }}
-                aria-label="enviar"
               >
                 <SendIcon />
               </IconButton>

@@ -38,7 +38,7 @@ class BettingAgent:
         self.odds_api = OddsAPI()
         self.bet_history = BetHistory()
         self.risk_manager = RiskManager(current_bankroll, self.bankroll_manager.phase)
-        
+
     def analyze_today_opportunities(self) -> List[Dict]:
         """Analisa todas oportunidades do dia usando The Odds API + API-Football"""
         from config.config import Config
@@ -119,7 +119,8 @@ class BettingAgent:
                 match_with_odds['home_team'],
                 match_with_odds['away_team'],
                 api_football_matches,
-                threshold=0.6  # 60% de similaridade mínima
+                odds_datetime=match_with_odds.get('commence_time'),
+                threshold=0.6
             )
             
             if matched_game:
@@ -170,6 +171,14 @@ class BettingAgent:
         opportunities = self._validate_opportunities(opportunities, phase_info)
         
         print(f"   ✅ {len(opportunities)} oportunidades validadas")
+        
+        
+        # Analisa Tênis
+        print("\n🎾 Analisando oportunidades de Tênis...")
+        tennis_opps = self.analyze_tennis_opportunities()
+        if tennis_opps:
+            opportunities.extend(tennis_opps)
+            print(f"   ✅ {len(tennis_opps)} oportunidades de tênis adicionadas")
         
         # Ordena por EV
         opportunities.sort(key=lambda x: x['ev'], reverse=True)
@@ -382,6 +391,18 @@ class BettingAgent:
             'avg_conceded': adjusted_conceded
         }
     
+    def _expected_goals(self, home_stats: Dict, away_stats: Dict) -> tuple:
+        """
+        Calcula expectativa de gols usando ataque vs defesa
+        
+        Returns:
+            (home_lambda, away_lambda) - Expectativa de gols de cada time
+        """
+        home_lambda = (home_stats['avg_scored'] + away_stats['avg_conceded']) / 2
+        away_lambda = (away_stats['avg_scored'] + home_stats['avg_conceded']) / 2
+        
+        return home_lambda, away_lambda
+    
     def _analyze_match_markets(self, match: Dict, odds: Dict, phase_info: Dict, 
                                home_stats: Dict, away_stats: Dict) -> List[Dict]:
         """Analisa mercados disponíveis do jogo"""
@@ -455,12 +476,13 @@ class BettingAgent:
     def _analyze_over(self, match: Dict, odds: Dict, home_stats: Dict, 
                      away_stats: Dict, line: float, market_odds: float, 
                      phase_info: Dict) -> Dict:
-        """Analisa oportunidade de Over"""
-        probs = self.probability_model.calculate_over_under(
-            home_stats['avg_scored'], 
-            away_stats['avg_scored'], 
-            line
-        )
+        """Analisa oportunidade de Over usando lambdas"""
+        
+        # Calcula lambdas (ataque vs defesa)
+        home_lambda, away_lambda = self._expected_goals(home_stats, away_stats)
+        
+        # Calcula probabilidades usando lambdas
+        probs = self.probability_model.calculate_over_under(home_lambda, away_lambda, line)
         
         is_valid, ev = self.probability_model.validate_opportunity(
             probs['prob_over'], 
@@ -497,12 +519,13 @@ class BettingAgent:
     def _analyze_under(self, match: Dict, odds: Dict, home_stats: Dict, 
                       away_stats: Dict, line: float, market_odds: float, 
                       phase_info: Dict) -> Dict:
-        """Analisa oportunidade de Under"""
-        probs = self.probability_model.calculate_over_under(
-            home_stats['avg_scored'], 
-            away_stats['avg_scored'], 
-            line
-        )
+        """Analisa oportunidade de Under usando lambdas"""
+        
+        # Calcula lambdas (ataque vs defesa)
+        home_lambda, away_lambda = self._expected_goals(home_stats, away_stats)
+        
+        # Calcula probabilidades usando lambdas
+        probs = self.probability_model.calculate_over_under(home_lambda, away_lambda, line)
         
         # Usa probabilidade de UNDER
         is_valid, ev = self.probability_model.validate_opportunity(
@@ -540,12 +563,13 @@ class BettingAgent:
     def _analyze_handicap(self, match: Dict, odds: Dict, home_stats: Dict, 
                          away_stats: Dict, line: float, market_odds: float, 
                          phase_info: Dict) -> Dict:
-        """Analisa oportunidade de Handicap/Spread"""
-        probs = self.probability_model.calculate_handicap(
-            home_stats['avg_scored'], 
-            away_stats['avg_scored'], 
-            line
-        )
+        """Analisa oportunidade de Handicap/Spread usando lambdas"""
+        
+        # Calcula lambdas (ataque vs defesa)
+        home_lambda, away_lambda = self._expected_goals(home_stats, away_stats)
+        
+        # Calcula probabilidades usando lambdas
+        probs = self.probability_model.calculate_handicap(home_lambda, away_lambda, line)
         
         is_valid, ev = self.probability_model.validate_opportunity(
             probs['prob_home_cover'], 
@@ -583,13 +607,13 @@ class BettingAgent:
     
     def _analyze_btts(self, match: Dict, odds: Dict, home_stats: Dict, 
                      away_stats: Dict, market_odds: float, phase_info: Dict) -> Dict:
-        """Analisa oportunidade de BTTS (Both Teams To Score)"""
-        prob_btts = self.probability_model.calculate_btts(
-            home_stats['avg_scored'],
-            home_stats['avg_conceded'],
-            away_stats['avg_scored'],
-            away_stats['avg_conceded']
-        )
+        """Analisa oportunidade de BTTS (Both Teams To Score) usando lambdas"""
+        
+        # Calcula lambdas (ataque vs defesa)
+        home_lambda, away_lambda = self._expected_goals(home_stats, away_stats)
+        
+        # Calcula probabilidade de BTTS usando lambdas
+        prob_btts = self.probability_model.calculate_btts_from_lambdas(home_lambda, away_lambda)
         
         is_valid, ev = self.probability_model.validate_opportunity(
             prob_btts, 
@@ -694,3 +718,58 @@ Faltam: R$ {info['remaining']:.2f}
 EV mínimo: {info['min_ev']}%
 Stake máximo: {info['max_stake_pct']}%
 """
+    def analyze_tennis_opportunities(self) -> List[Dict]:
+        """Analisa oportunidades de apostas em Tênis"""
+        try:
+            from src.services.tennis_api import TennisAPI
+            from src.models.tennis_probability_model import TennisProbabilityModel
+            
+            print("\n🎾 === ANALISANDO TÊNIS ===")
+            
+            tennis_api = TennisAPI()
+            tennis_model = TennisProbabilityModel()
+            opportunities = []
+            
+            # Busca partidas ao vivo
+            matches = tennis_api.get_live_matches()
+            
+            if not matches:
+                print("ℹ️ Nenhuma partida de tênis ao vivo no momento")
+                return []
+            
+            print(f"📊 Analisando {len(matches)} partidas de tênis...")
+            
+            for match in matches:
+                player1_name = match.get('player1', 'Unknown')
+                player2_name = match.get('player2', 'Unknown')
+                tour = match.get('tour', 'ATP')
+                
+                # Busca stats dos jogadores
+                player1_stats = tennis_api.get_player_stats_from_ranking(player1_name, tour)
+                player2_stats = tennis_api.get_player_stats_from_ranking(player2_name, tour)
+                
+                # Calcula probabilidade
+                prob = tennis_model.calculate_match_winner(
+                    player1_win_rate=player1_stats['estimated_win_rate'],
+                    player2_win_rate=player2_stats['estimated_win_rate'],
+                    surface=match.get('surface', 'Hard')
+                )
+                
+                # Aqui você integraria com Odds API para buscar odds reais
+                # Por enquanto, registra a análise
+                opportunities.append({
+                    'sport': 'Tennis',
+                    'match': f"{player1_name} vs {player2_name}",
+                    'tournament': match.get('tournament', 'Unknown'),
+                    'player1_prob': prob['prob_player1_win'],
+                    'player2_prob': prob['prob_player2_win'],
+                    'player1_rank': player1_stats['rank'],
+                    'player2_rank': player2_stats['rank'],
+                })
+            
+            print(f"✅ {len(opportunities)} partidas de tênis analisadas")
+            return opportunities
+            
+        except Exception as e:
+            print(f"⚠️ Erro ao analisar tênis: {e}")
+            return []

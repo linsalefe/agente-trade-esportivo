@@ -57,4 +57,16 @@ class Config:
         'database': os.getenv('DB_NAME', 'agente_betting'),
         'user': os.getenv('DB_USER', 'postgres'),
         'password': os.getenv('DB_PASSWORD')
-    }
+    }    
+    # NFL
+    NFL_ENABLED = os.getenv('NFL_ENABLED', 'False') == 'True'
+    ESPN_NFL_BASE_URL = os.getenv('ESPN_NFL_BASE_URL', 'https://site.api.espn.com/apis/site/v2/sports/football/nfl')
+    NFL_MIN_EV = float(os.getenv('NFL_MIN_EV', 8))
+    NFL_HOME_ADVANTAGE = float(os.getenv('NFL_HOME_ADVANTAGE', 2.5))
+    
+    # Tennis
+    TENNIS_ENABLED = os.getenv('TENNIS_ENABLED', 'False') == 'True'
+    TENNIS_MIN_EV = float(os.getenv('TENNIS_MIN_EV', 8))
+    
+    # RapidAPI Tennis
+    RAPIDAPI_TENNIS_KEY = os.getenv('RAPIDAPI_TENNIS_KEY')
